@@ -10,7 +10,9 @@ class Application {
         this._renderer  = null;
         this._scene     = null;
         this._camera    = null;
-        this._cubes      = null;
+        this._meshes    = [];
+        this._materials = [];
+        this._material  = null;
         this._controls  = null;
         this._initialize();
     }
@@ -32,14 +34,19 @@ class Application {
         this._controls.dampingFactor = 0.05;
 
         // Create geometry, apply a material to it, and insert into scene
-        const geometry  = new THREE.BoxGeometry(1,1,1);
-        this._cubes     = [
-            this._makeGeometry(geometry, 0x44aa88, 0),
-            this._makeGeometry(geometry, 0x8844aa, -2),
-            this._makeGeometry(geometry, 0xaa8844, 2),
-        ];
-        
-        this._cubes.forEach((cube) => {
+        const cubeGeo   = new THREE.BoxGeometry(1,1,1);
+
+        this._makeGeometry(cubeGeo, 0x44aa88, 0);
+        this._makeGeometry(cubeGeo, 0x8844aa, -2);
+        this._makeGeometry(cubeGeo, 0xaa8844, 2);
+
+        const planeGeo  = new THREE.PlaneGeometry(10, 10, 20, 20);
+        let plane = this._makeGeometry(planeGeo, 0x444444, -1);
+        plane.position.y = -1;
+        plane.rotation.x = -Math.PI/2.0;
+
+
+        this._meshes.forEach((cube) => {
             this._scene.add(cube);
         });
 
@@ -61,21 +68,32 @@ class Application {
 
         // animate cube
 
-        this._cubes.forEach((cube, ndx) => {
-            const rot = (1 + ndx) * 0.01;
-            cube.rotation.x += rot;
-            cube.rotation.y += rot;
+        this._meshes.forEach((mesh, index) => {
+            if (index == 0 || index == 1 || index == 2) { 
+                const rot = (1 + index) * 0.01;
+                mesh.rotation.x += rot;
+                mesh.rotation.y += rot;
+            }
         })
-
 
         this._renderer.render(this._scene, this._camera);
     }
 
     _makeGeometry(geometry, color, xpos) { 
         const material  = new THREE.MeshPhongMaterial({color});
-        const cube      = new THREE.Mesh(geometry, material);
-        cube.position.x = xpos;
-        return cube;
+        const mesh      = new THREE.Mesh(geometry, material);
+        mesh.position.x = xpos;
+
+        this._materials.push(material);
+        this._meshes.push(mesh);
+        return mesh;
+    }
+
+    toggleWireframe() {
+        console.log("Toggle wireframe");
+        this._materials.forEach((mat) => {
+            mat.wireframe = !mat.wireframe;
+        });
     }
 
 }
@@ -83,6 +101,10 @@ class Application {
 
 function _Main() {
     const app = new Application();
+
+    document.getElementById("wireframeToggle").addEventListener('click', () => {
+        app.toggleWireframe();
+    })
 }
 
 _Main();
