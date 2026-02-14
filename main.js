@@ -96,15 +96,24 @@ class Application {
         });
     }
 
+    onWindowResize() {
+        // Update camera
+        this._camera.aspect = window.innerWidth / window.innerHeight;
+        this._camera.updateProjectionMatrix();
+        
+        // Update renderer
+        this._renderer.setSize(window.innerWidth, window.innerHeight);
+    }
 }
-
 
 function _Main() {
     const app = new Application();
 
+    // event listeners
     document.getElementById("wireframeToggle").addEventListener('click', () => {
         app.toggleWireframe();
     })
+    window.addEventListener('resize', () => app.onWindowResize());
 }
 
 _Main();
