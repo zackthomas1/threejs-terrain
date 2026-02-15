@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 // import/create loader
 // const loader    = new GLTFLoader();
@@ -18,7 +17,7 @@ class Application {
         this._initialize();
     }
 
-    _initialize() {
+    async _initialize() {
         // set up clock
         this._clock     = new THREE.Clock();
 
@@ -43,30 +42,25 @@ class Application {
 
         // Create geometry, apply a material to it, and insert into scene
         const planeGeo  = new THREE.PlaneGeometry(10, 10, 256, 256);
-        let plane = this._makeGeometry(planeGeo, 0x444444, -1);
+
+        const vsh = await fetch('./terrain.vs').then(r => r.text());
+        const fsh = await fetch('./terrain.fs').then(r => r.text());
+
+        const material = new THREE.ShaderMaterial({
+            uniforms: {},
+            vertexShader: vsh,
+            fragmentShader: fsh,
+            wireframe: false
+        });
+
+        const plane = new THREE.Mesh(planeGeo, material);
+        plane.position.x = -1;
         plane.position.y = -1;
         plane.rotation.x = -Math.PI/2.0;
 
-        this._meshes.forEach((cube) => {
-            this._scene.add(cube);
-        });
-
-        const geometry = plane.geometry;
-        const positionAttrib = geometry.getAttribute('position'); 
-
-        for (let i = 0; i < positionAttrib.count; i++){
-            const x = positionAttrib.getX(i);
-            const y = positionAttrib.getY(i);
-            const z = positionAttrib.getZ(i);
-
-            const distance = Math.sqrt((x*x) + (y*y));
-        
-            let h = Math.max(0, 1.0 - (distance / 5.0));
-            const height = h * h * h * (h * (h * 6 - 15) + 10);
-            positionAttrib.setZ(i, height);
-        }
-
-        positionAttrib.needsUpdate = true;
+        this._materials.push(material);
+        this._meshes.push(plane);
+        this._scene.add(plane);
 
         // create a light 
         const light = new THREE.DirectionalLight(0xFFFFFF, 3);  // color, intensity
