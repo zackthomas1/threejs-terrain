@@ -40,18 +40,42 @@ class Application {
         this._camera.position.z = 5;
         this._camera.position.y = 1;
 
-        // Create geometry, apply a material to it, and insert into scene
+        // Create geometry, apply material, and insert into scene
         const planeGeo  = new THREE.PlaneGeometry(10, 10, 256, 256);
 
-        const vsh = await fetch('./terrain.vs').then(r => r.text());
-        const fsh = await fetch('./terrain.fs').then(r => r.text());
+        // Define terrain logic to inject
+        const terrainLogic = `
+          float dist = length(position.xy);
+          
+          // Calculate height based on distance from center (0,0)
+          float h = max(0.0, 1.0 - (dist / 5.0));
+          
+          // Quintic ease curve
+          float height = h * h * h * (h * (h * 6.0 - 15.0) + 10.0);
+          
+          // Apply height to the z-coordinate (which is up in local space before rotation)
+          transformed.z = height * 2.0;
+        `;
 
-        const material = new THREE.ShaderMaterial({
-            uniforms: {},
-            vertexShader: vsh,
-            fragmentShader: fsh,
-            wireframe: false
+        const material = new THREE.MeshPhongMaterial({
+            color: 0x444444,
+            shininess: 30,
+            wireframe: false,
+            flatShading: true, // Helps visualize terrain structure since normals aren't recalculated
+            side: THREE.DoubleSide
         });
+
+        // Hook into the shader compilation
+        material.onBeforeCompile = (shader) => {
+            // Inject logic into the vertex shader
+            shader.vertexShader = shader.vertexShader.replace(
+                '#include <begin_vertex>',
+                `
+                #include <begin_vertex>
+                ${terrainLogic}
+                `
+            );
+        };
 
         const plane = new THREE.Mesh(planeGeo, material);
         plane.position.x = -1;
@@ -87,10 +111,8 @@ class Application {
         this._renderer.render(this._scene, this._camera);
     }
 
-    _makeGeometry(geometry, color, xpos) { 
-        const material  = new THREE.MeshPhongMaterial({color});
+    _constructMesh(geometry, material) { 
         const mesh      = new THREE.Mesh(geometry, material);
-        mesh.position.x = xpos;
 
         this._materials.push(material);
         this._meshes.push(mesh);
