@@ -12,12 +12,16 @@ class Application {
         this._camera    = null;
         this._meshes    = [];
         this._materials = [];
-        this._material  = null;
+        this._lights    = [];
         this._controls  = null;
+        this._clock = null;
         this._initialize();
     }
 
     _initialize() {
+        // set up clock
+        this._clock     = new THREE.Clock();
+
         // set up scene and camera
         this._scene     = new THREE.Scene();
         this._camera    = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -33,48 +37,58 @@ class Application {
         this._controls.enableDamping = true;
         this._controls.dampingFactor = 0.05;
 
+        // Position camera
+        this._camera.position.z = 5;
+        this._camera.position.y = 1;
+
         // Create geometry, apply a material to it, and insert into scene
-        const cubeGeo   = new THREE.BoxGeometry(1,1,1);
-
-        this._makeGeometry(cubeGeo, 0x44aa88, 0);
-        this._makeGeometry(cubeGeo, 0x8844aa, -2);
-        this._makeGeometry(cubeGeo, 0xaa8844, 2);
-
-        const planeGeo  = new THREE.PlaneGeometry(10, 10, 20, 20);
+        const planeGeo  = new THREE.PlaneGeometry(10, 10, 256, 256);
         let plane = this._makeGeometry(planeGeo, 0x444444, -1);
         plane.position.y = -1;
         plane.rotation.x = -Math.PI/2.0;
-
 
         this._meshes.forEach((cube) => {
             this._scene.add(cube);
         });
 
+        const geometry = plane.geometry;
+        const positionAttrib = geometry.getAttribute('position'); 
+
+        for (let i = 0; i < positionAttrib.count; i++){
+            const x = positionAttrib.getX(i);
+            const y = positionAttrib.getY(i);
+            const z = positionAttrib.getZ(i);
+
+            const distance = Math.sqrt((x*x) + (y*y));
+        
+            let h = Math.max(0, 1.0 - (distance / 5.0));
+            const height = h * h * h * (h * (h * 6 - 15) + 10);
+            positionAttrib.setZ(i, height);
+        }
+
+        positionAttrib.needsUpdate = true;
+
         // create a light 
         const light = new THREE.DirectionalLight(0xFFFFFF, 3);  // color, intensity
         light.position.set(-1,2,4);
+        this._lights.push(light);
         this._scene.add(light);
 
         // set scene background
-        this._scene.background = new THREE.Color(0x666666);
-
-        // Position camera
-        this._camera.position.z = 5;
+        this._scene.background = new THREE.Color(0x667789);
     }
 
     _animate() {
         // update controls
         this._controls.update();
 
-        // animate cube
+        const time = this._clock.getElapsedTime();
 
-        this._meshes.forEach((mesh, index) => {
-            if (index == 0 || index == 1 || index == 2) { 
-                const rot = (1 + index) * 0.01;
-                mesh.rotation.x += rot;
-                mesh.rotation.y += rot;
-            }
-        })
+        // animate light
+        this._lights.forEach((light) => {
+            light.position.x = Math.sin(time) * 5;
+            light.position.z = Math.sin(time) * 5;
+        });
 
         this._renderer.render(this._scene, this._camera);
     }
