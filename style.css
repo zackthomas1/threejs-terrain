@@ -47,7 +47,8 @@ canvas {
     border-radius: 8px;
 }
 
-#controlPanel h3 {
+#controlPanel h3,
+#controlPanel label {
     color: #fff;
     margin-bottom: 15px;
     text-align: center;

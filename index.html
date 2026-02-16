@@ -12,6 +12,14 @@
       <h3>Controls</h3>
       <button id="wireframeToggle">Toggle Wireframe</button>
       <button id="normalsToggle">Toggle Normals</button>
+      <div class="control-group">
+        <label for="segmentsInput">Segments:</label>
+        <input type="number" id="segmentsInput" min="1" max="1024" value="256">
+      </div>
+      <div class="control-group">
+        <label for="heightmapInput">Upload Heightmap:</label>
+        <input type="file" id="heightmapInput" accept="image/*">
+      </div>
     </div>
     
     <script type="module" src="./main.js">

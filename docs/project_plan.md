@@ -5,9 +5,9 @@
 - [ ] **TSL Vertex Displacement**: Modify the plane mesh geometry using vertex shader to set the height of each vertex based on its distance from the origin. Define the terrain's positionNode using TSL. use MeshStandardNodeMaterial to allow procedural logic to drive vertex offsets directly in the shader.
 [TSL: A Better Way to Write Shaders in Three.js](https://threejsroadmap.com/blog/tsl-a-better-way-to-write-shaders-in-threejs)
 
-- [ ] **Analytical Normal Calculation**: Procedural displacement requires the manual calculation of surface normals. Implement a TSL function that calculates the analytical derivatives of your noise function. This ensures that lighting and shadows react correctly to the peaks and valleys
+- [x] **Analytical Normal Calculation**: Procedural displacement requires the manual calculation of surface normals. Implement a TSL function that calculates the analytical derivatives of your noise function. This ensures that lighting and shadows react correctly to the peaks and valleys
 
-- [ ] **Heightmap Sampling**: Implement heightmap sampling with bilinear filtering in the shader to prevent blocky artifacts (stair-stepping) when the camera is close to the surface.
+- [x] **Heightmap Sampling**: Implement heightmap sampling with bilinear filtering in the shader to prevent blocky artifacts (stair-stepping) when the camera is close to the surface.
 
 ## Phase 2. Applying perlin nose and fractional brownian motion 
 Transition from simple noise to complex, multi-scale terrain.
