@@ -76,6 +76,18 @@ class Application {
         // Assign the new position node to the material
         material.positionNode = TSL.positionLocal.add(displacement);
 
+        // 5. Analytical Normal Calculation
+        // Use TSL's cross product of derivatives to simulate the normal for displaced geometry.
+        // This is equivalent to `normalize(cross(dFdx(pos), dFdy(pos)))`
+        // Note: For a truly continuous normal, we would take the analytical derivative of the quintic function.
+        // But for procedural terrain, this derivative method is very robust.
+        
+        // We need to calculate the normal based on the *world* position change.
+        // Or simply assign the cross of the derivatives of the *local* position.
+        
+        const pos = material.positionNode;
+        material.normalNode = TSL.cross(TSL.dFdx(pos), TSL.dFdy(pos)).normalize();
+
         const plane = new THREE.Mesh(planeGeo, material);
         plane.position.x = -1;
         plane.position.y = -1;
@@ -104,7 +116,7 @@ class Application {
         // animate light
         this._lights.forEach((light) => {
             light.position.x = Math.sin(time) * 5;
-            light.position.z = Math.sin(time) * 5;
+            light.position.y = Math.sin(time) * 5;
         });
 
         this._renderer.render(this._scene, this._camera);
