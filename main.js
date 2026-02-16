@@ -30,13 +30,12 @@ class TerrainChunk {
         });
 
         // UV setup for heightmap sampling (map local space -5 to 5 to 0..1 UV)
-        // Plane is 10x10 centered at 0,0, so local XY goes from -5 to 5.
-        const uv = TSL.positionLocal.xy.div(10).add(0.5);
+        const uv = TSL.positionLocal.xy.div(this._size).add(0.5);
         
-        // Create heightmap texture and sample from heightmap
+        // Setup heightmap texture and sample from heightmap
         const defaultRes = 256;
-        this._heightmapNode = TSL.texture(this._generateHeightmap(defaultRes));
-        this._heightmapResUniform = TSL.uniform(defaultRes);
+        this._heightmapNode         = TSL.texture(this._generateHeightmap(defaultRes));
+        this._heightmapResUniform   = TSL.uniform(defaultRes);
         const sample = this._bilinearSample(this._heightmapNode, uv, this._heightmapResUniform);
 
         // Calculate analytic normal
@@ -47,10 +46,10 @@ class TerrainChunk {
         // Debug Visualization
         // Create a node outputs the normal as a color (0..1 range)
         // Normal range is -1..1, so we map it: normal * 0.5 + 0.5
-        this._normalColorNode = this._material.normalNode.mul(0.5).add(0.5);
-        this._originalColorNode = TSL.color(0x444444); // Store original color
+        this._normalColorNode       = this._material.normalNode.mul(0.5).add(0.5);
+        this._originalColorNode     = TSL.color(0x444444); // Store original color
 
-        // Create Mesh
+        // Create Mesh and set transform
         this._mesh = new THREE.Mesh(geometry, this._material);
         this._mesh.position.x = -1;
         this._mesh.position.y = -1;
@@ -59,28 +58,12 @@ class TerrainChunk {
 
     _generateHeightmap(size = 256) {
         const data = new Float32Array(size * size);
-        for (let i = 0; i < size * size; i++) {
-            const x = i % size;
-            const y = Math.floor(i / size);
-            
-            const nx = x / size - 0.5;
-            const ny = y / size - 0.5;
-            
-            // Simple mountain shape with some noise for detail
-            let h = Math.max(0, 1.0 - Math.sqrt(nx * nx + ny * ny) * 2.5);
-            
-            // Add some artificial detail that bilinear filtering will sample
-            h += Math.sin(nx * 15) * 0.1 * h;
-            h += Math.cos(ny * 12) * 0.05 * h;
-            
-            data[i] = h;
-        }
 
-        const texture = new THREE.DataTexture(data, size, size, THREE.RedFormat, THREE.FloatType);
-        texture.minFilter = THREE.LinearFilter;
-        texture.magFilter = THREE.LinearFilter;
-        texture.wrapS = THREE.ClampToEdgeWrapping;
-        texture.wrapT = THREE.ClampToEdgeWrapping;
+        const texture       = new THREE.DataTexture(data, size, size, THREE.RedFormat, THREE.FloatType);
+        texture.minFilter   = THREE.LinearFilter;
+        texture.magFilter   = THREE.LinearFilter;
+        texture.wrapS       = THREE.ClampToEdgeWrapping;
+        texture.wrapT       = THREE.ClampToEdgeWrapping;
         texture.needsUpdate = true;
         return texture;
     }
@@ -119,10 +102,12 @@ class TerrainChunk {
     updateHeightmap(texture) {
         // Update the texture node's value so all dependent TSL nodes update
         this._heightmapNode.value = texture;
-        
+
         // Update the resolution uniform based on the new texture dimensions
         // assuming square texture for simplicity, or we could use a vec2 if needed
-        this._heightmapResUniform.value = texture.image.width;
+        const res = texture.image.width;
+        this._heightmapResUniform.value = res;
+
         console.log(`Heightmap updated. New resolution: ${res}x${res}`);
     }
 
@@ -133,7 +118,7 @@ class TerrainChunk {
         const oldGeometry = this._mesh.geometry;
         
         // Create new plane geometry with updated segments
-        this._mesh.geometry = new THREE.PlaneGeometry(10, 10, segments, segments);
+        this._mesh.geometry = new THREE.PlaneGeometry(this._size, this._size, segments, segments);
         
         // Dispose of old geometry to prevent memory leaks
         // We do this after assigning the new one to ensure the mesh always has a geometry
