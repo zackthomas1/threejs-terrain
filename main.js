@@ -77,16 +77,14 @@ class Application {
         material.positionNode = TSL.positionLocal.add(displacement);
 
         // 5. Analytical Normal Calculation
-        // Use TSL's cross product of derivatives to simulate the normal for displaced geometry.
-        // This is equivalent to `normalize(cross(dFdx(pos), dFdy(pos)))`
-        // Note: For a truly continuous normal, we would take the analytical derivative of the quintic function.
-        // But for procedural terrain, this derivative method is very robust.
-        
-        // We need to calculate the normal based on the *world* position change.
-        // Or simply assign the cross of the derivatives of the *local* position.
-        
         const pos = material.positionNode;
         material.normalNode = TSL.cross(TSL.dFdx(pos), TSL.dFdy(pos)).normalize();
+
+        // 6. Optional: Debug Visualization
+        // We can create a node that outputs the normal as a color (0..1 range)
+        // Normal range is -1..1, so we map it: normal * 0.5 + 0.5
+        this._normalColorNode = material.normalNode.mul(0.5).add(0.5);
+        this._originalColorNode = TSL.color(0x444444); // Store original color
 
         const plane = new THREE.Mesh(planeGeo, material);
         plane.position.x = -1;
@@ -137,6 +135,23 @@ class Application {
         });
     }
 
+    toggleNormals() {
+        console.log("Toggle Normals");
+        this._materials.forEach((mat) => {
+            // Check if we are currently showing normals
+            if (mat.colorNode === this._normalColorNode) {
+                // Revert to original flat color
+                mat.colorNode = this._originalColorNode;
+                mat.lights = true;
+            } else {
+                // Show normals
+                mat.colorNode = this._normalColorNode;
+                mat.lights = false;
+            }
+            mat.needsUpdate = true;
+        });
+    }
+
     onWindowResize() {
         // Update camera
         this._camera.aspect = window.innerWidth / window.innerHeight;
@@ -153,6 +168,9 @@ function _Main() {
     // event listeners
     document.getElementById("wireframeToggle").addEventListener('click', () => {
         app.toggleWireframe();
+    })
+    document.getElementById("normalsToggle").addEventListener('click', () => {
+        app.toggleNormals();
     })
     window.addEventListener('resize', () => app.onWindowResize());
 }
