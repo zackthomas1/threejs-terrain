@@ -1,8 +1,7 @@
-import * as THREE from 'three';
+import * as THREE from 'three/webgpu';
+import * as TSL from 'three/tsl';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-// import/create loader
-// const loader    = new GLTFLoader();
 
 class Application {
     constructor() {
@@ -26,7 +25,7 @@ class Application {
         this._camera    = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
     
         // set up renderer
-        this._renderer  = new THREE.WebGLRenderer();
+        this._renderer  = new THREE.WebGPURenderer({ antialias: true });
         this._renderer.setSize(window.innerWidth, window.innerHeight);
         this._renderer.setAnimationLoop(() => this._animate());
         document.body.appendChild(this._renderer.domElement); // add renderer element to HTML document
@@ -43,39 +42,39 @@ class Application {
         // Create geometry, apply material, and insert into scene
         const planeGeo  = new THREE.PlaneGeometry(10, 10, 256, 256);
 
-        // Define terrain logic to inject
-        const terrainLogic = `
-          float dist = length(position.xy);
-          
-          // Calculate height based on distance from center (0,0)
-          float h = max(0.0, 1.0 - (dist / 5.0));
-          
-          // Quintic ease curve
-          float height = h * h * h * (h * (h * 6.0 - 15.0) + 10.0);
-          
-          // Apply height to the z-coordinate (which is up in local space before rotation)
-          transformed.z = height * 2.0;
-        `;
-
-        const material = new THREE.MeshPhongMaterial({
+        // --- TSL Terrain Material Setup ---
+        const material = new THREE.MeshPhongNodeMaterial({
             color: 0x444444,
             shininess: 30,
             wireframe: false,
-            flatShading: true, // Helps visualize terrain structure since normals aren't recalculated
+            flatShading: true,
             side: THREE.DoubleSide
         });
 
-        // Hook into the shader compilation
-        material.onBeforeCompile = (shader) => {
-            // Inject logic into the vertex shader
-            shader.vertexShader = shader.vertexShader.replace(
-                '#include <begin_vertex>',
-                `
-                #include <begin_vertex>
-                ${terrainLogic}
-                `
-            );
-        };
+        // 1. Calculate distance from center (0,0) in local space
+        const dist = TSL.length(TSL.positionLocal.xy);
+        
+        // 2. Calculate normalized height factor (0.0 to 1.0)
+        // logic: h = max(0.0, 1.0 - (dist / 5.0))
+        const h = TSL.float(1.0).sub(dist.div(5.0)).max(0.0);
+        
+        // 3. Apply quintic ease curve: h^3 * (h * (h * 6 - 15) + 10)
+        const h3 = h.mul(h).mul(h);
+        
+        // 6.0 * h - 15.0
+        const inner = h.mul(6.0).sub(15.0);
+        // (h * inner + 10.0)
+        const mid = h.mul(inner).add(10.0);
+        // h^3 * mid
+        const height = h3.mul(mid);
+
+        // 4. Update the vertex position
+        // We want to offset Z by 'height * 2.0'
+        // New Position = Original Position + vec3(0, 0, height*2)
+        const displacement = TSL.vec3(0, 0, height.mul(2.0));
+        
+        // Assign the new position node to the material
+        material.positionNode = TSL.positionLocal.add(displacement);
 
         const plane = new THREE.Mesh(planeGeo, material);
         plane.position.x = -1;
