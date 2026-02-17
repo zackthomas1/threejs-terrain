@@ -35,6 +35,7 @@ class HeightMap {
         texture.wrapT       = THREE.ClampToEdgeWrapping;
         texture.needsUpdate = true;
 
+        // TSL Terrain Material Node configuration
         // Setup heightmap texture and sample from heightmap
         this._heightmapNode         = TSL.texture(texture);
         this._heightmapResUniform   = TSL.uniform(defaultRes);
@@ -78,7 +79,7 @@ class HeightMap {
     }
 
     setTexture(texture) {
-        if (texture == null) {
+        if (texture === null) {
             throw new Error('HeightMap.setTexture: texture is required');
         }
 
@@ -201,8 +202,8 @@ class TerrainChunkManager {
 
     onWireframe() {
         console.log("Toggle wireframe");
-        for (let k in this._chunks) {
-            let chunk = this._chunks[k];
+        for (const k in this._chunks) {
+            const chunk = this._chunks[k];
             chunk._material.wireframe = !chunk._material.wireframe;
         }
     }
@@ -210,8 +211,8 @@ class TerrainChunkManager {
     onNormals() {
         console.log("Toggle Normals");
         
-        for (let k in this._chunks) {
-            let chunk = this._chunks[k];
+        for (const k in this._chunks) {
+            const chunk = this._chunks[k];
             
             // Check if we are currently showing normals
             if (chunk._material.colorNode === chunk._materialNodes["normalColor"]) {
@@ -262,7 +263,7 @@ class Application {
         // set up renderer
         this._renderer  = new THREE.WebGPURenderer({ antialias: true });
         this._renderer.setSize(window.innerWidth, window.innerHeight);
-        this._renderer.setAnimationLoop(() => this._animate());
+        this._renderer.setAnimationLoop(() => this._update());
         document.body.appendChild(this._renderer.domElement); // add renderer element to HTML document
 
         // set up scene and camera
@@ -295,14 +296,18 @@ class Application {
         });
     }
 
-    _animate() {
+    _update() {
         // update controls
         this._controls.update();
 
-        const time = this._clock.getElapsedTime();
-
+        const deltaTime = this._clock.getDelta();
         // update entities
+        for (const k in this._entites) {
+            const entity = this._entites[k];
+            entity.update(deltaTime);
+        }
 
+        // render frame
         this._renderer.render(this._scene, this._camera);
     }
 
