@@ -12,10 +12,6 @@ class HeightMap {
     _heightmapResUniform    = null;
 
     constructor(params) {
-        this._initialize(params);
-    }
-
-    _initialize(params) {
         if (!params || !Number.isFinite(params.chunkSize) || params.chunkSize < 1) {
             throw new Error('HeightMap._initialize: params.chunkSize must be a positive number.');
         }
@@ -105,10 +101,6 @@ class TerrainChunk {
     _materialNodes          = {};
 
     constructor(params) {
-        this._initialize(params);
-    }
-
-    _initialize(params) {
         // Create geometry, apply material, and insert into scene
         const geometry  = new THREE.PlaneGeometry(
             params.chunkSize, params.chunkSize, 
@@ -165,11 +157,6 @@ class TerrainChunkManager {
     _chunkSegements = 32;
 
     constructor(params) {
-        this._initializeTerrain(params);
-    }
-
-    _initializeTerrain(params) {
-
         // Initialize GUI parameters
         params.guiParams.terrain = {
             wireframe : false,
@@ -260,11 +247,7 @@ class Application {
     _clock      = null;
 
     constructor() {
-        this._initializeGUI();
-        this._initialize();
-    }
-
-    _initializeGUI() {
+        // initialize gui
         this._guiParams = {
             general : {},
         }; 
@@ -272,9 +255,7 @@ class Application {
 
         const generalRollup = this._gui.addFolder('General');
         generalRollup.close();
-    }
 
-    _initialize() {
         // set up clock
         this._clock     = new THREE.Clock();
 
@@ -319,6 +300,8 @@ class Application {
         this._controls.update();
 
         const time = this._clock.getElapsedTime();
+
+        // update entities
 
         this._renderer.render(this._scene, this._camera);
     }
