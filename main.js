@@ -1,8 +1,9 @@
 import * as THREE from 'three/webgpu';
 import * as TSL from 'three/tsl';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import GUI from 'lil-gui';
+import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
 import { NoiseGenerator } from './noise';
+import GUI from 'lil-gui';
 
 class HeightMap {
     _heightmapNode      = null;
@@ -158,7 +159,7 @@ class TerrainChunk {
 class TerrainChunkManager {
     _group      = null;
     _chunks     = {};
-    _chunkSize  = 64;
+    _chunkSize  = 128;
     _chunkSegements = 256;
     _noiseGenerator = null;
     _noiseParams = {};
@@ -172,7 +173,7 @@ class TerrainChunkManager {
 
         params.guiParams.noise = {
             noiseType: 'simplex',
-            scale: 256.0,
+            scale: 64.0,
             octaves: 10,
             persistence: 0.5,
             lacunarity: 2.0,
@@ -186,9 +187,9 @@ class TerrainChunkManager {
         const noiseRollup = params.gui.addFolder("Noise"); 
         noiseRollup.add(params.guiParams.noise, "noiseType", ["simplex", "perlin"]).onFinishChange(
             () => { this.onNoiseChange(); });
-        noiseRollup.add(params.guiParams.noise, "scale", 64.0, 512.0).onFinishChange(
+        noiseRollup.add(params.guiParams.noise, "scale", 1.0, 256.0).onFinishChange(
             () => { this.onNoiseChange(); });
-        noiseRollup.add(params.guiParams.noise, "octaves", 1, 20, 1).onFinishChange(
+        noiseRollup.add(params.guiParams.noise, "octaves", 1, 16, 1).onFinishChange(
             () => { this.onNoiseChange(); });
         noiseRollup.add(params.guiParams.noise, "persistence", 0.01, 1.0).onFinishChange(
             () => { this.onNoiseChange(); });
@@ -273,7 +274,6 @@ class TerrainChunkManager {
     }
 
     _addChunk(x, y) {
-
         const texture = this._generateHeightMapTexture(x,y);
 
         // create chunk
@@ -335,6 +335,136 @@ class TerrainChunkManager {
     }
 }
 
+class Atmosphere { 
+    _sky = null;
+    _fog = null;
+    _skyParams = {};
+    _sunParams = {};
+    _fogParams = {};
+
+    constructor(params) {
+        // Setup gui controls for sun and sky
+        params.guiParams.sky = { 
+            turbidity: 0.2,
+            rayleigh: 0.3,
+            mieCoefficient: 0.005,
+            mieDirectionalG: 0.6,
+            lumminance: 1,
+        }; 
+
+        params.guiParams.sun = { 
+            inclination: 25.0,
+            azimuth: 0.25,
+        };
+
+        params.guiParams.fog = {
+            enable: true,
+            color: '#667789',
+            near: 32,
+            far: 256,
+        };
+
+        this._skyParams = params.guiParams.sky;
+        this._sunParams = params.guiParams.sun;
+        this._fogParams = params.guiParams.fog;
+
+        const AtmosphereRollup = params.gui.addFolder("Atmosphere");
+        AtmosphereRollup.add(params.guiParams.sky, "turbidity", 0.01, 1.0)
+            .onChange(() => { this.onShaderChange(); });
+        AtmosphereRollup.add(params.guiParams.sky, "rayleigh", 0.01, 1.0)
+            .onChange(() => { this.onShaderChange(); });
+        AtmosphereRollup.add(params.guiParams.sky, "mieCoefficient", 0.0001, 0.1)
+            .onChange(() => { this.onShaderChange(); });
+        AtmosphereRollup.add(params.guiParams.sky, "mieDirectionalG", 0.0, 1.0)
+            .onChange(() => { this.onShaderChange(); });
+        AtmosphereRollup.add(params.guiParams.sky, "lumminance", 0.0, 2.0)
+            .onChange(() => { this.onShaderChange(); });
+
+        AtmosphereRollup.add(params.guiParams.sun, "inclination", 0.0, 180.0)
+            .onChange(() => { this.onShaderChange(); })
+            .name("inclination (degrees)");;
+        AtmosphereRollup.add(params.guiParams.sun, "azimuth", 0.0, 360.0)
+            .onChange(() => { this.onShaderChange(); })
+            .name("azimuth (degrees)");
+
+        AtmosphereRollup.add(params.guiParams.fog, "enable", true)
+            .onChange(() => { this.onFogChange(); })
+            .name("Enable Fog ");
+        AtmosphereRollup.addColor(params.guiParams.fog, "color", 0.0, 2.0)
+            .onChange(() => { this.onFogChange(); })
+            .name("Fog color");
+        AtmosphereRollup.add(params.guiParams.fog, "near", 1.0, 100.0)
+            .onChange(() => { this.onFogChange(); })
+            .name("Fog near clip");
+        AtmosphereRollup.add(params.guiParams.fog, "far", 10.0, 4000.0)
+            .onChange(() => { this.onFogChange(); })
+            .name("Fog far clip");
+
+        // Setup Sky
+        this._sky = new SkyMesh();
+        this._sky.scale.setScalar(10000);
+        params.scene.add(this._sky);
+
+        // // Setup atmospheric fog
+        // this._fog = new THREE.Fog(this._fogParams.color, this._fogParams.near, this._fogParams.far);
+        // params.scene.fog = this._fog;
+
+        // Initial shader update
+        this.onShaderChange();
+    }
+
+    update(deltaTime) {
+        // TODO: Implement update function 
+        return
+    }
+
+    // event handlers
+    onFogChange() { 
+        if (!this._fog) {
+            return;
+        }
+
+        // Ensure color assignment works with number or Color input
+        this._fog.color.set(this._fogParams.color);
+        this._fog.near = this._fogParams.near;
+        this._fog.far = this._fogParams.far;
+    }
+
+    onShaderChange() {
+        
+        // Inclination is the vertical angle (0 = bottom, PI/2 = horizon, PI = top)
+        // Azimuth is the horizontal rotation (0 to 2*PI)
+        const theta = Math.PI / 2 - THREE.MathUtils.degToRad(this._sunParams.inclination);
+        const phi = THREE.MathUtils.degToRad(this._sunParams.azimuth);
+        
+        const sunPosition = new THREE.Vector3(
+            Math.sin(theta) * Math.cos(phi),
+            Math.cos(theta),
+            Math.sin(theta) * Math.sin(phi)
+        ).normalize();
+        
+        // Update SkyMesh parameters via its uniform nodes
+        if (this._sky) {
+            if (this._sky.sunPosition?.value) {
+                this._sky.sunPosition.value.copy(sunPosition);
+            }
+            if (this._sky.turbidity?.value !== undefined) {
+                this._sky.turbidity.value = this._skyParams.turbidity;
+            }
+            if (this._sky.rayleigh?.value !== undefined) {
+                this._sky.rayleigh.value = this._skyParams.rayleigh;
+            }
+            if (this._sky.mieCoefficient?.value !== undefined) {
+                this._sky.mieCoefficient.value = this._skyParams.mieCoefficient;
+            }
+            if (this._sky.mieDirectionalG?.value !== undefined) {
+                this._sky.mieDirectionalG.value = this._skyParams.mieDirectionalG;
+            }
+        }
+    }
+}
+
+const HEMISPHERELIGHTCOLOR = 0xffffbb;
 class Application {
     _gui        = null;
     _guiParams  = {};
@@ -356,7 +486,6 @@ class Application {
         this._gui = new GUI();
 
         const generalRollup = this._gui.addFolder('General');
-        generalRollup.close();
 
         // set up clock
         this._clock     = new THREE.Clock();
@@ -380,21 +509,30 @@ class Application {
         this._camera.position.z = 10;
         this._camera.position.y = 30;
 
-        // create a light 
+        // create lights
         const light = new THREE.DirectionalLight(0xFFFFFF, 3);  // color, intensity
-        light.position.set(-1,2,4);
+        light.position.set(-1, 2, 4);
         this._lights.push(light);
-        this._scene.add(light);
+        // this._lights.push(new THREE.HemisphereLight(0xffffbb, 0x080820, 1));
+        this._lights.forEach((light) => { this._scene.add(light); });
 
         // set scene background
         this._scene.background = new THREE.Color(0x667789);
-    
+
+        // Create sun and sky
+        this._entites['sky'] = new Atmosphere({
+            scene : this._scene,
+            gui : this._gui,
+            guiParams : this._guiParams
+        });
+
         // Create terrain
         this._entites['terrain'] = new TerrainChunkManager({
             scene : this._scene,
             gui : this._gui,
             guiParams : this._guiParams
         });
+        
     }
 
     _update() {
@@ -402,13 +540,18 @@ class Application {
         this._controls.update();
 
         const deltaTime = this._clock.getDelta();
+        const elapsedTime = this._clock.getElapsedTime();
+
         // update entities
         for (const k in this._entites) {
             const entity = this._entites[k];
             entity.update(deltaTime);
         }
 
-        this._lights
+        // this._lights.forEach((light) => {
+        //     light.position.x = Math.sin(elapsedTime) * 4;
+        //     light.position.z = Math.sin(elapsedTime) * 4;
+        // });
 
         // render frame
         this._renderer.render(this._scene, this._camera);
