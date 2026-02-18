@@ -2,44 +2,33 @@ import * as THREE from 'three/webgpu';
 import * as TSL from 'three/tsl';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import GUI from 'lil-gui';
-
-class NoiseMap {
-
-}
+import { NoiseGenerator } from './noise';
 
 class HeightMap {
-    _heightmapNode          = null;
-    _heightmapResUniform    = null;
+    _heightmapNode      = null;
+    _resolutionUniform  = null;
 
     constructor(params) {
         if (!params || !Number.isFinite(params.chunkSize) || params.chunkSize < 1) {
             throw new Error('HeightMap._initialize: params.chunkSize must be a positive number.');
         }
+        if (!Number.isFinite(params.chunkSegments) || params.chunkSegments < 1) {
+            throw new Error('HeightMap._initialize: params.chunkSegments must be a positive number.');
+        }
         if (!params.material) {
             throw new Error('HeightMap._initialize: missing params.material.');
         }
         
-        // UV setup for heightmap sampling (map local space -5 to 5 to 0..1 UV)
+        // UV setup for heightmap sampling: map local space [-(chunkSize/2), (chunkSize/2)] to UV [0,1])
         const uv = TSL.positionLocal.xy.div(params.chunkSize).add(0.5);
         
-        // create default height map texture
-        const defaultRes = 256;
-        const texture    = new THREE.DataTexture(
-            new Float32Array(defaultRes * defaultRes),
-            defaultRes, defaultRes, 
-            THREE.RedFormat, THREE.FloatType
-        );
-        texture.minFilter   = THREE.LinearFilter;
-        texture.magFilter   = THREE.LinearFilter;
-        texture.wrapS       = THREE.ClampToEdgeWrapping;
-        texture.wrapT       = THREE.ClampToEdgeWrapping;
-        texture.needsUpdate = true;
-
         // TSL Terrain Material Node configuration
         // Setup heightmap texture and sample from heightmap
-        this._heightmapNode         = TSL.texture(texture);
-        this._heightmapResUniform   = TSL.uniform(defaultRes);
-        const sample = this._bilinearSample(this._heightmapNode, uv, this._heightmapResUniform);
+        this._heightmapNode = TSL.texture(params.textureMap);
+        // Resolution uniform matches texture size (segments + 1)
+        const textureResolution = params.textureMap.image?.width || (params.chunkSegments + 1);
+        this._resolutionUniform = TSL.uniform(textureResolution);
+        const sample = this._bilinearSample(this._heightmapNode, uv, this._resolutionUniform);
 
         // Calculate analytic normal
         params.material.positionNode = TSL.positionLocal.add(TSL.vec3(0, 0, sample));
@@ -47,27 +36,31 @@ class HeightMap {
         params.material.normalNode = TSL.cross(TSL.dFdx(pos), TSL.dFdy(pos)).normalize();
     }
 
-    // 2. Manual Bilinear Filtering implementation in TSL
-    // This ensures smooth transitions between discrete heightmap samples
-    // and provides high-precision interpolation for vertex displacement.
+    // Manual Bilinear Filtering implementation in TSL: 
+    // ensures smooth transitions between discrete heightmap samples
     _bilinearSample(texNode, uv, filtersize) {
         return TSL.Fn(({ texNode, uv, filtersize }) => {
             const size = TSL.vec2(filtersize, filtersize);
             const texelSize = TSL.vec2(1.0).div(size);
             
-            // Shift UV by half-texel to center the sampling grid
-            const coord = uv.mul(size).sub(0.5);
+            // Map UV [0,1] to texel coordinates [0, resolution-1]
+            // For vertex-aligned sampling: UV=0 → texel 0, UV=1 → texel (resolution-1)
+            const coord = uv.mul(size.sub(1.0));
             const i = TSL.floor(coord);
             const f = TSL.fract(coord);
             
-            // Helper to sample a single texel.
-            const sample = (offset) => texNode.sample(i.add(offset).add(0.5).mul(texelSize)).r;
+            // Clamp integer index to valid range
+            const maxIndex = size.sub(1.0);
+            const i_clamped = TSL.clamp(i, TSL.vec2(0.0), maxIndex);
             
-            // Sample 4 neighboring texels
-            const a = sample(TSL.vec2(0, 0));
-            const b = sample(TSL.vec2(1, 0));
-            const c = sample(TSL.vec2(0, 1));
-            const d = sample(TSL.vec2(1, 1));
+            // Calculate neighbor indices with clamping
+            const i_next = TSL.min(i_clamped.add(1.0), maxIndex);
+            
+            // Sample 4 neighboring texels at texel centers
+            const a = texNode.sample(i_clamped.mul(texelSize).add(texelSize.mul(0.5))).r;
+            const b = texNode.sample(TSL.vec2(i_next.x, i_clamped.y).mul(texelSize).add(texelSize.mul(0.5))).r;
+            const c = texNode.sample(TSL.vec2(i_clamped.x, i_next.y).mul(texelSize).add(texelSize.mul(0.5))).r;
+            const d = texNode.sample(i_next.mul(texelSize).add(texelSize.mul(0.5))).r;
             
             // Perform bilinear interpolation
             return TSL.mix(
@@ -78,6 +71,7 @@ class HeightMap {
         })({ texNode, uv, filtersize });
     }
 
+
     setTexture(texture) {
         if (texture === null) {
             throw new Error('HeightMap.setTexture: texture is required');
@@ -87,10 +81,10 @@ class HeightMap {
         this._heightmapNode.value = texture;
 
         // Update the resolution uniform based on the new texture dimensions 
-        // assumes square texture for simplicity
-        const res = texture.image?.width;
-        if (Number.isFinite(res)) {
-            this._heightmapResUniform.value = res;
+        // Note: texture resolution is (segments+1), but uniform should be segments for correct filtering
+        const texRes = texture.image?.width;
+        if (Number.isFinite(texRes)) {
+            this._resolutionUniform.value = texRes;
         }
     }
 }
@@ -120,7 +114,9 @@ class TerrainChunk {
 
         this._heightMap = new HeightMap({
             chunkSize: params.chunkSize,
-            material: this._material
+            chunkSegments: params.chunkSegments,
+            material: this._material,
+            textureMap: params.heightMapTexture,
         });
 
         // Debug Visualization
@@ -149,15 +145,64 @@ class TerrainChunk {
             params.chunkSegments, params.chunkSegments
         );
     }
+
+    setTexture(texture) {
+        if (!this._heightMap) {
+            throw new Error('TerrainChunk.setTexture: height map is not initialized');
+        }
+
+        this._heightMap.setTexture(texture);
+    }
 }
 
 class TerrainChunkManager {
     _group      = null;
     _chunks     = {};
     _chunkSize  = 64;
-    _chunkSegements = 32;
+    _chunkSegements = 256;
+    _noiseGenerator = null;
+    _noiseParams = {};
 
     constructor(params) {
+        this._inititializeNoise(params);
+        this._initializeTerrain(params);
+    }
+
+    _inititializeNoise(params) {
+
+        params.guiParams.noise = {
+            noiseType: 'simplex',
+            scale: 256.0,
+            octaves: 10,
+            persistence: 0.5,
+            lacunarity: 2.0,
+            exponentiation: 3.9,
+            height: 64,
+            seed: 1
+        }
+
+        this._noiseParams = params.guiParams.noise;
+        
+        const noiseRollup = params.gui.addFolder("Noise"); 
+        noiseRollup.add(params.guiParams.noise, "noiseType", ["simplex", "perlin"]).onFinishChange(
+            () => { this.onNoiseChange(); });
+        noiseRollup.add(params.guiParams.noise, "scale", 64.0, 512.0).onFinishChange(
+            () => { this.onNoiseChange(); });
+        noiseRollup.add(params.guiParams.noise, "octaves", 1, 20, 1).onFinishChange(
+            () => { this.onNoiseChange(); });
+        noiseRollup.add(params.guiParams.noise, "persistence", 0.01, 1.0).onFinishChange(
+            () => { this.onNoiseChange(); });
+        noiseRollup.add(params.guiParams.noise, "lacunarity", 0.01, 4.0).onFinishChange(
+            () => { this.onNoiseChange(); });
+        noiseRollup.add(params.guiParams.noise, "exponentiation", 0.1, 10.0).onFinishChange(
+            () => { this.onNoiseChange(); });
+        noiseRollup.add(params.guiParams.noise, "height", 0, 128).onFinishChange(
+            () => { this.onNoiseChange(); });
+
+        this._noiseGenerator = new NoiseGenerator(this._noiseParams);
+    }
+
+    _initializeTerrain (params) {
         // Initialize GUI parameters
         params.guiParams.terrain = {
             wireframe : false,
@@ -186,7 +231,51 @@ class TerrainChunkManager {
         }
     }
 
+    _generateHeightMapTexture(x,y) {
+        // PlaneGeometry with N segments has (N+1) vertices per axis
+        // Texture resolution must match vertex count for proper edge continuity
+        const resolution = this._chunkSegements + 1;
+        const data = new Float32Array(resolution * resolution);
+        
+        // DataTexture data is row-major: data[row * width + col] = data[y * width + x]
+        for (let row = 0; row < resolution; row++) {
+            // Calculate world-space Y position (row index maps to Y axis)
+            const worldY = (y * this._chunkSize) - (this._chunkSize / 2) + (row * this._chunkSize / this._chunkSegements);
+            for (let col = 0; col < resolution; col++) {
+                // Calculate world-space X position (column index maps to X axis)
+                const worldX = (x * this._chunkSize) - (this._chunkSize / 2) + (col * this._chunkSize / this._chunkSegements);
+                data[(row * resolution) + col] = this._noiseGenerator.get2D(worldX, worldY);
+            }
+        }
+
+        const texture       = new THREE.DataTexture(data,
+            resolution, resolution, 
+            THREE.RedFormat, THREE.FloatType);
+        texture.minFilter   = THREE.LinearFilter;
+        texture.magFilter   = THREE.LinearFilter;
+        texture.wrapS       = THREE.ClampToEdgeWrapping;
+        texture.wrapT       = THREE.ClampToEdgeWrapping;
+        texture.needsUpdate = true;
+        
+        return texture;
+    }
+
+    _key (x, y) {
+        return x + "." + y;
+    }
+
+    _keyCoord(keyStr) {
+        const parts = keyStr.split(".");
+        return {
+            x: parseInt(parts[0], 10),
+            y: parseInt(parts[1], 10)
+        };
+    }
+
     _addChunk(x, y) {
+
+        const texture = this._generateHeightMapTexture(x,y);
+
         // create chunk
         const terrainChunk = new TerrainChunk({
             position: new THREE.Vector2(x * this._chunkSize, y * this._chunkSize),
@@ -194,12 +283,13 @@ class TerrainChunkManager {
             scale: 1,
             chunkSize: this._chunkSize,
             chunkSegments: this._chunkSegements,
+            heightMapTexture: texture,
         });
 
-        const key = x + "." + y;
-        this._chunks[key] = terrainChunk;
+        this._chunks[this._key(x,y)] = terrainChunk;
     }
 
+    // Event handlers
     onWireframe() {
         console.log("Toggle wireframe");
         for (const k in this._chunks) {
@@ -228,10 +318,21 @@ class TerrainChunkManager {
         }
     }
 
-    update(deltaTime) {
-
+    onNoiseChange() {
+        console.log("TerrainChunkManager.onNoiseChange")
+        this._noiseGenerator.setParams(this._noiseParams);
+        for (const k in this._chunks) {
+            const coords = this._keyCoord(k);
+            const texture = this._generateHeightMapTexture(coords.x, coords.y);
+            const chunk = this._chunks[k];
+            chunk.setTexture(texture);
+        }
     }
 
+    update(deltaTime) {
+        // TODO: Implement update function 
+        return
+    }
 }
 
 class Application {
@@ -276,8 +377,8 @@ class Application {
         this._controls.dampingFactor = 0.05;
 
         // Position camera
-        this._camera.position.z = 5;
-        this._camera.position.y = 1;
+        this._camera.position.z = 10;
+        this._camera.position.y = 30;
 
         // create a light 
         const light = new THREE.DirectionalLight(0xFFFFFF, 3);  // color, intensity
@@ -307,27 +408,11 @@ class Application {
             entity.update(deltaTime);
         }
 
+        this._lights
+
         // render frame
         this._renderer.render(this._scene, this._camera);
     }
-
-    sampleHeightMap(url) {
-        const loader = new THREE.TextureLoader();
-        
-        // Load the texture asynchronously
-        return new Promise((resolve, reject) => {
-            loader.load(url, (texture) => {
-                // Set configuration to match the generated heightmap as closely as possible
-                texture.minFilter = THREE.LinearFilter;
-                texture.magFilter = THREE.LinearFilter;
-                texture.wrapS = THREE.ClampToEdgeWrapping;
-                texture.wrapT = THREE.ClampToEdgeWrapping;
-                texture.colorSpace = THREE.NoColorSpace;
-                resolve(texture);
-            }, undefined, reject);
-        });
-    }
-
     onWindowResize() {
         // Update camera
         this._camera.aspect = window.innerWidth / window.innerHeight;
