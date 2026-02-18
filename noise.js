@@ -1,5 +1,3 @@
-
-
 import { createNoise2D, createNoise3D } from 'simplex-noise';
 
 class SimplexGenerator {
@@ -112,7 +110,7 @@ export class NoiseGenerator {
         let normalization = 0;
         let total = 0;
         for (let o = 0; o < this._octaves; o++) {
-            const noiseValue = noiseFunc.noise3D(
+            const noiseValue = noiseFunc.get3D(
                 xs * frequency, ys * frequency, zs * frequency) * 0.5 + 0.5;
             total += noiseValue * amplitude;
             normalization += amplitude;
