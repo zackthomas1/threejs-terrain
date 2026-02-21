@@ -104,9 +104,8 @@ class TerrainChunk {
         );
         
         // --- TSL Terrain Material Setup ---
-        this._material = new THREE.MeshPhongNodeMaterial({
+        this._material = new THREE.MeshLambertNodeMaterial({
             color: 0x444444,
-            shininess: 30,
             wireframe: false,
             flatShading: false,
             side: THREE.DoubleSide
@@ -349,6 +348,12 @@ class TerrainAtmosphere {
         if (typeof params.atmosphereHost?.setFog !== 'function') {
             throw new Error('TerrainAtmosphere: params.atmosphereHost.setFog must be a function.');
         }
+        if (
+            params.atmosphereHost?.setSunDirection !== undefined &&
+            typeof params.atmosphereHost.setSunDirection !== 'function'
+        ) {
+            throw new Error('TerrainAtmosphere: params.atmosphereHost.setSunDirection must be a function when provided.');
+        }
 
         // Setup Sky
         this._sky = new SkyMesh();
@@ -369,7 +374,7 @@ class TerrainAtmosphere {
         }; 
 
         params.guiParams.sun = { 
-            inclination: 25.0,
+            inclination: 80.0,
             azimuth: 0.25,
         };
 
@@ -474,10 +479,24 @@ class TerrainAtmosphere {
                 this._sky.mieDirectionalG.value = this._skyParams.mieDirectionalG;
             }
         }
+
+        this._atmosphereHost.setSunDirection?.(sunPosition);
     }
 }
 
-const HEMISPHERELIGHTCOLOR = 0xffffbb;
+class TerrainScene {
+
+}
+
+const SUNLIGHTCOLOR = '#FFFFFF'
+const FILL_LIGHT_COLOR = '#dfe8f2';
+const HEMISPHERE_LIGHT_SKY_COLOR = '#bbf7ff';
+const HEMISPHERE_LIGHT_GROUND_COLOR = '#33335f';
+
+const SUNLIGHT_INTENSITY = 2.0;
+const FILL_LIGHT_INTENSITY = 1.0;
+const HEMISPHERE__LIGHT_INTENSITY = 1.0;
+const SUNLIGHT_DISTANCE = 512;
 class Application {
     _gui        = null;
     _guiParams  = {};
@@ -488,6 +507,9 @@ class Application {
     _scene      = null;
     _camera     = null;
     _lights     = [];
+    _sunLight   = null;
+    _fillLight  = null;
+    _sunTarget  = null;
     _controls   = null;
     _clock      = null;
 
@@ -523,11 +545,38 @@ class Application {
         this._camera.position.y = 30;
 
         // create lights
-        const light = new THREE.DirectionalLight(0xFFFFFF, 3);  // color, intensity
+        // Sun light
+        this._sunTarget = new THREE.Object3D();
+        this._sunTarget.position.set(0, 0, 0);
+
+        const light = new THREE.DirectionalLight(SUNLIGHTCOLOR, SUNLIGHT_INTENSITY);
+        this._scene.add(this._sunTarget);
+        light.target = this._sunTarget;
         light.position.set(-1, 2, 4);
+        this._sunLight = light;
         this._lights.push(light);
-        // this._lights.push(new THREE.HemisphereLight(0xffffbb, 0x080820, 1));
+
+        // fill light
+        const fillLight = new THREE.DirectionalLight(FILL_LIGHT_COLOR, FILL_LIGHT_INTENSITY);
+        fillLight.target = this._sunTarget;
+        fillLight.position.set(1, -2, -4);
+        this._fillLight = fillLight;
+        this._lights.push(fillLight);
+
+        // hemisphere light
+        const hemiLight = new THREE.HemisphereLight(HEMISPHERE_LIGHT_SKY_COLOR, HEMISPHERE_LIGHT_GROUND_COLOR, HEMISPHERE__LIGHT_INTENSITY);
+        this._lights.push(hemiLight);
+
         this._lights.forEach((light) => { this._scene.add(light); });
+
+        // Add light helpers for visualization
+        const sunLightHelper = new THREE.DirectionalLightHelper(this._sunLight, 40);
+        sunLightHelper.targetLine = 100;
+        this._scene.add(sunLightHelper);
+        
+        const fillLightHelper = new THREE.DirectionalLightHelper(this._fillLight, 40);
+        fillLightHelper.targetLine = 100;
+        this._scene.add(fillLightHelper);
 
         // set scene background
         this._scene.background = new THREE.Color(0x667789);
@@ -540,6 +589,31 @@ class Application {
             atmosphereHost : {
                 setFog: (fogOrNull) => {
                     this._scene.fog = fogOrNull;
+                },
+                setSunDirection: (sunDirection) => {
+                    if (!this._sunLight || !this._fillLight || !this._sunTarget || !sunDirection) {
+                        console.error("setSunDirection missing required sunLight or fillLight");
+                        return;
+                    }
+
+                    // Position sun light
+                    this._sunLight.position.copy(
+                        sunDirection.clone().multiplyScalar(SUNLIGHT_DISTANCE)
+                    );
+
+                    // Position fill light: same height (Y), rotated 180° around Y-axis
+                    // Rotation around Y-axis: (x, y, z) -> (-x, y, -z)
+                    const fillDirection = new THREE.Vector3(
+                        -sunDirection.x,
+                        sunDirection.y,
+                        -sunDirection.z
+                    );
+                    this._fillLight.position.copy(
+                        fillDirection.multiplyScalar(SUNLIGHT_DISTANCE)
+                    );
+
+                    this._sunTarget.position.set(0, 0, 0);
+                    this._sunTarget.updateMatrixWorld();
                 }
             }
         });
