@@ -335,14 +335,30 @@ class TerrainChunkManager {
     }
 }
 
-class Atmosphere { 
+const SKYBOXSCALE = 10000;
+class TerrainAtmosphere { 
     _sky = null;
     _fog = null;
+    _atmosphereHost = null;
     _skyParams = {};
     _sunParams = {};
     _fogParams = {};
 
     constructor(params) {
+        // guard check params are valid
+        if (typeof params.atmosphereHost?.setFog !== 'function') {
+            throw new Error('TerrainAtmosphere: params.atmosphereHost.setFog must be a function.');
+        }
+
+        // Setup Sky
+        this._sky = new SkyMesh();
+        this._sky.scale.setScalar(SKYBOXSCALE);
+        params.scene.add(this._sky);
+
+        // Setup atmospheric fog
+        this._fog = new THREE.Fog(this._fogParams.color, this._fogParams.near, this._fogParams.far);
+        this._atmosphereHost = params.atmosphereHost;
+
         // Setup gui controls for sun and sky
         params.guiParams.sky = { 
             turbidity: 0.2,
@@ -359,58 +375,55 @@ class Atmosphere {
 
         params.guiParams.fog = {
             enable: true,
-            color: '#667789',
-            near: 32,
-            far: 256,
+            color: '#96afca',
+            near: 64,
+            far: 1024,
         };
 
         this._skyParams = params.guiParams.sky;
         this._sunParams = params.guiParams.sun;
         this._fogParams = params.guiParams.fog;
 
-        const AtmosphereRollup = params.gui.addFolder("Atmosphere");
-        AtmosphereRollup.add(params.guiParams.sky, "turbidity", 0.01, 1.0)
-            .onChange(() => { this.onShaderChange(); });
-        AtmosphereRollup.add(params.guiParams.sky, "rayleigh", 0.01, 1.0)
-            .onChange(() => { this.onShaderChange(); });
-        AtmosphereRollup.add(params.guiParams.sky, "mieCoefficient", 0.0001, 0.1)
-            .onChange(() => { this.onShaderChange(); });
-        AtmosphereRollup.add(params.guiParams.sky, "mieDirectionalG", 0.0, 1.0)
-            .onChange(() => { this.onShaderChange(); });
-        AtmosphereRollup.add(params.guiParams.sky, "lumminance", 0.0, 2.0)
-            .onChange(() => { this.onShaderChange(); });
+        const atmosphereRollup = params.gui.addFolder("Atmosphere");
+        const skyRollup = atmosphereRollup.addFolder("Sky");
+        const sunRollup = atmosphereRollup.addFolder("Sun");
+        const fogRollup = atmosphereRollup.addFolder("Fog");
 
-        AtmosphereRollup.add(params.guiParams.sun, "inclination", 0.0, 180.0)
-            .onChange(() => { this.onShaderChange(); })
+        skyRollup.add(params.guiParams.sky, "turbidity", 0.01, 1.0)
+            .onChange(() => { this.onSunSkyChange(); });
+        skyRollup.add(params.guiParams.sky, "rayleigh", 0.01, 1.0)
+            .onChange(() => { this.onSunSkyChange(); });
+        skyRollup.add(params.guiParams.sky, "mieCoefficient", 0.0001, 0.1)
+            .onChange(() => { this.onSunSkyChange(); });
+        skyRollup.add(params.guiParams.sky, "mieDirectionalG", 0.0, 1.0)
+            .onChange(() => { this.onSunSkyChange(); });
+        skyRollup.add(params.guiParams.sky, "lumminance", 0.0, 2.0)
+            .onChange(() => { this.onSunSkyChange(); });
+
+        sunRollup.add(params.guiParams.sun, "inclination", 0.0, 180.0)
+            .onChange(() => { this.onSunSkyChange(); })
             .name("inclination (degrees)");;
-        AtmosphereRollup.add(params.guiParams.sun, "azimuth", 0.0, 360.0)
-            .onChange(() => { this.onShaderChange(); })
+        sunRollup.add(params.guiParams.sun, "azimuth", 0.0, 360.0)
+            .onChange(() => { this.onSunSkyChange(); })
             .name("azimuth (degrees)");
 
-        AtmosphereRollup.add(params.guiParams.fog, "enable", true)
+        fogRollup.add(params.guiParams.fog, "enable", true)
+            .onChange(() => { this._atmosphereHost.setFog(this._fogParams.enable ? this._fog : null); })
+            .name("enabled");
+        fogRollup.addColor(params.guiParams.fog, "color", 0.0, 2.0)
             .onChange(() => { this.onFogChange(); })
-            .name("Enable Fog ");
-        AtmosphereRollup.addColor(params.guiParams.fog, "color", 0.0, 2.0)
+            .name("color");
+        fogRollup.add(params.guiParams.fog, "near", 1.0, 128.0)
             .onChange(() => { this.onFogChange(); })
-            .name("Fog color");
-        AtmosphereRollup.add(params.guiParams.fog, "near", 1.0, 100.0)
+            .name("near clip");
+        fogRollup.add(params.guiParams.fog, "far", 128.0, SKYBOXSCALE)
             .onChange(() => { this.onFogChange(); })
-            .name("Fog near clip");
-        AtmosphereRollup.add(params.guiParams.fog, "far", 10.0, 4000.0)
-            .onChange(() => { this.onFogChange(); })
-            .name("Fog far clip");
+            .name("far clip");
 
-        // Setup Sky
-        this._sky = new SkyMesh();
-        this._sky.scale.setScalar(10000);
-        params.scene.add(this._sky);
-
-        // // Setup atmospheric fog
-        // this._fog = new THREE.Fog(this._fogParams.color, this._fogParams.near, this._fogParams.far);
-        // params.scene.fog = this._fog;
-
-        // Initial shader update
-        this.onShaderChange();
+        // Initialize atmoshphere
+        this.onSunSkyChange();
+        this.onFogChange();
+        this._atmosphereHost.setFog(this._fogParams.enable ? this._fog : null);
     }
 
     update(deltaTime) {
@@ -430,7 +443,7 @@ class Atmosphere {
         this._fog.far = this._fogParams.far;
     }
 
-    onShaderChange() {
+    onSunSkyChange() {
         
         // Inclination is the vertical angle (0 = bottom, PI/2 = horizon, PI = top)
         // Azimuth is the horizontal rotation (0 to 2*PI)
@@ -520,10 +533,15 @@ class Application {
         this._scene.background = new THREE.Color(0x667789);
 
         // Create sun and sky
-        this._entites['sky'] = new Atmosphere({
+        this._entites['atmosphere'] = new TerrainAtmosphere({
             scene : this._scene,
             gui : this._gui,
-            guiParams : this._guiParams
+            guiParams : this._guiParams,
+            atmosphereHost : {
+                setFog: (fogOrNull) => {
+                    this._scene.fog = fogOrNull;
+                }
+            }
         });
 
         // Create terrain
@@ -556,6 +574,7 @@ class Application {
         // render frame
         this._renderer.render(this._scene, this._camera);
     }
+
     onWindowResize() {
         // Update camera
         this._camera.aspect = window.innerWidth / window.innerHeight;
