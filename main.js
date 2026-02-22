@@ -2,7 +2,7 @@ import * as THREE from 'three/webgpu';
 import * as TSL from 'three/tsl';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
-import { NoiseGenerator } from './noise';
+import { NoiseGenerator } from './src/noise';
 import GUI from 'lil-gui';
 
 const TERRAIN_ROOT = document.getElementById('terrain-root');
