@@ -226,6 +226,7 @@ class TerrainChunkManager {
     _chunkSize  = 128;
     _chunkSegments = 256;
     _noiseGenerator = null;
+    _terrainParams = {};
     _noiseParams = {};
 
     constructor(params) {
@@ -245,7 +246,6 @@ class TerrainChunkManager {
             height: 32.0,
             seed: 1
         }
-
         this._noiseParams = params.guiParams.noise;
         
         const noiseRollup = params.gui.addFolder("Noise"); 
@@ -273,6 +273,7 @@ class TerrainChunkManager {
             wireframe : false,
             normals : false,
         }
+        this._terrainParams = params.guiParams.terrain;
 
         // Create GUI Terrain rollup
         const terrainRollup = params.gui.addFolder("Terrain");
@@ -358,7 +359,7 @@ class TerrainChunkManager {
         console.log("Toggle wireframe");
         for (const k in this._chunks) {
             const chunk = this._chunks[k];
-            chunk._material.wireframe = !chunk._material.wireframe;
+            chunk._material.wireframe = this._terrainParams.wireframe;
         }
     }
 
@@ -369,7 +370,7 @@ class TerrainChunkManager {
             const chunk = this._chunks[k];
             
             // Check if we are currently showing normals
-            if (chunk._material.colorNode === chunk._materialNodes["normalColor"]) {
+            if (!this._terrainParams.normals) {
                 // show diffuse
                 chunk._material.colorNode   = chunk._materialNodes["diffuseColor"];
                 chunk._material.lights      = true;
