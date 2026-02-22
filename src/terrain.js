@@ -230,11 +230,11 @@ class TerrainChunkManager {
     _noiseParams = {};
 
     constructor(params) {
-        this._inititializeNoise(params);
+        this._initializeNoise(params);
         this._initializeTerrain(params);
     }
 
-    _inititializeNoise(params) {
+    _initializeNoise(params) {
 
         params.guiParams.noise = {
             noiseType: 'simplex',
