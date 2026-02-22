@@ -7,11 +7,9 @@ import * as CONFIG from './config';
 
 const SKYBOXSCALE = 10000;
 const SUNLIGHTCOLOR = '#FFFFFF'
-const FILL_LIGHT_COLOR = '#dfe8f2';
 const HEMISPHERE_LIGHT_SKY_COLOR = '#bbf7ff';
 const HEMISPHERE_LIGHT_GROUND_COLOR = '#33335f';
 const SUNLIGHT_INTENSITY = 2.0;
-const FILL_LIGHT_INTENSITY = 1.0;
 const HEMISPHERE_LIGHT_INTENSITY = 0.6;
 const SUNLIGHT_DISTANCE = 256;
 
@@ -226,7 +224,7 @@ class TerrainChunkManager {
     _group      = null;
     _chunks     = {};
     _chunkSize  = 128;
-    _chunkSegements = 256;
+    _chunkSegments = 256;
     _noiseGenerator = null;
     _noiseParams = {};
 
@@ -301,8 +299,8 @@ class TerrainChunkManager {
     _generateHeightMapTexture(x,y) {
         // PlaneGeometry with N segments has (N+1) vertices per axis.
         // Add a 1-texel border on each side so edge normals can sample central differences across chunk seams.
-        const resolution = this._chunkSegements + 3;
-        const sampleStep = this._chunkSize / this._chunkSegements;
+        const resolution = this._chunkSegments + 3;
+        const sampleStep = this._chunkSize / this._chunkSegments;
         const data = new Float32Array(resolution * resolution);
         
         // DataTexture data is row-major: data[row * width + col] = data[y * width + x]
@@ -348,7 +346,7 @@ class TerrainChunkManager {
             group: this._group,
             scale: 1,
             chunkSize: this._chunkSize,
-            chunkSegments: this._chunkSegements,
+            chunkSegments: this._chunkSegments,
             heightMapTexture: texture,
         });
 
@@ -446,8 +444,7 @@ class TerrainAtmosphere {
             rayleigh: 0.3,
             mieCoefficient: 0.005,
             mieDirectionalG: 0.6,
-            luminance: 1,
-        }; 
+        };
 
         params.guiParams.sun = { 
             intensity: 7.0,
@@ -480,8 +477,6 @@ class TerrainAtmosphere {
             .onChange(() => { this.onSunSkyChange(); });
         skyRollup.add(params.guiParams.sky, "mieDirectionalG", 0.0, 1.0)
             .onChange(() => { this.onSunSkyChange(); });
-        skyRollup.add(params.guiParams.sky, "luminance", 0.0, 2.0)
-            .onChange(() => { this.onSunSkyChange(); });
 
         // sun
         sunRollup.add(params.guiParams.sun, "intensity", 1.0, 10.0)
@@ -498,7 +493,7 @@ class TerrainAtmosphere {
         fogRollup.add(params.guiParams.fog, "enable", true)
             .onChange(() => { this._atmosphereHost.setFog(this._fogParams.enable ? this._fog : null); })
             .name("enabled");
-        fogRollup.addColor(params.guiParams.fog, "color", 0.0, 2.0)
+        fogRollup.addColor(params.guiParams.fog, "color")
             .onChange(() => { this.onFogChange(); })
             .name("color");
         fogRollup.add(params.guiParams.fog, "near", 1.0, 128.0)
@@ -528,6 +523,7 @@ class TerrainAtmosphere {
         this._sunLight = new THREE.DirectionalLight(SUNLIGHTCOLOR, SUNLIGHT_INTENSITY);
         this._sunLight.target = this._sunTarget;
         this._sunLight.position.set(-1, 2, 4);
+        lightGroup.add(this._sunTarget);
         lightGroup.add(this._sunLight);
 
         // hemisphere light
@@ -587,9 +583,6 @@ class TerrainAtmosphere {
             }
             if (this._sky.mieDirectionalG?.value !== undefined) {
                 this._sky.mieDirectionalG.value = this._skyParams.mieDirectionalG;
-            }
-            if (this._sky.luminance?.value !== undefined) {
-                this._sky.luminance.value = this._skyParams.luminance;
             }
         }
 
