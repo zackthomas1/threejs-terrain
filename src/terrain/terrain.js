@@ -1,10 +1,8 @@
 import * as THREE from 'three/webgpu';
 import * as TSL from 'three/tsl';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-
-import * as CONFIG from '../config';
 import { NoiseGenerator } from '../noise';
 import { TerrainAtmosphere } from './terrain-atmosphere';
+import { OrbitController, FPSController } from '../controller';
 
 class HeightMap {
     _heightmapNode      = null;
@@ -229,6 +227,7 @@ class TerrainChunkManager {
 
     _initializeNoise(params) {
 
+        // setup noise GUI fields
         params.guiParams.noise = {
             noiseType: 'simplex',
             scale: 64.0,
@@ -261,7 +260,7 @@ class TerrainChunkManager {
     }
 
     _initializeTerrain (params) {
-        // Initialize GUI parameters
+        // Setup terrrain GUI parameters
         params.guiParams.terrain = {
             wireframe : false,
             normals : false,
@@ -283,11 +282,12 @@ class TerrainChunkManager {
         params.scene.add(this._group);
 
         // create chunks
-        for (let x = -1; x <= 1; x++) {
-            for (let y = -1; y <= 1; y++) {
-                this._addChunk(x, y);
-            }
-        }
+        // for (let x = -1; x <= 1; x++) {
+        //     for (let y = -1; y <= 1; y++) {
+        //         this._addChunk(x, y);
+        //     }
+        // }
+        this._addChunk(0, 0);
     }
 
     _generateHeightMapTexture(x,y) {
@@ -409,28 +409,27 @@ class TerrainChunkManager {
     }
 }
 
-
 export class TerrainScene {
-    _entities    = {};
-    _scene      = null;
-    _camera     = null;
-    _controls   = null;
+    _entities = {};
+    _scene = null;
+    _activeController = null;
+    _sceneParams = null;
 
     constructor(params) {
-    // set up scene and camera
         this._scene     = new THREE.Scene();
-        this._camera    = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
 
-        // set up orbit controls
-        this._controls = new OrbitControls(this._camera, CONFIG.CANVAS_TARGET);
-        this._controls.enableDamping = true;
-        this._controls.dampingFactor = 0.05;
+        // Set up scene GUI
+        params.guiParams.scene = {
+            activeController : "FPS",
+        }
+        this._sceneParams = params.guiParams.scene;
 
-        // Position camera
-        this._camera.position.z = 10;
-        this._camera.position.y = 30;
-
-        // Create sun and sky
+        const sceneRollup = params.gui.addFolder('Scene');
+        sceneRollup.add(this._sceneParams, "activeController", ["Orbit", "FPS"])
+            .onChange(() => { this.onActiveControllerChange(); })
+            .name("active controller");
+    
+        // Create Scene entities
         this._entities['atmosphere'] = new TerrainAtmosphere({
             scene : this._scene,
             gui : params.gui,
@@ -442,19 +441,26 @@ export class TerrainScene {
             }
         });
 
-        // Create terrain
         this._entities['terrain'] = new TerrainChunkManager({
             scene : this._scene,
             gui : params.gui,
             guiParams : params.guiParams
         });
 
+        this._entities['orbit-controller'] = new OrbitController({
+            scene : this._scene,
+            gui : params.gui,
+        });
+
+        this._entities['fps-controller'] = new FPSController({
+            scene : this._scene,
+            gui : params.gui
+        });
+
+        this.onActiveControllerChange();
     }
 
     update(deltaTime) {
-        // update camera controls
-        this._controls.update();
-
         // update entities
         for (const k in this._entities) {
             const entity = this._entities[k];
@@ -464,7 +470,7 @@ export class TerrainScene {
 
     render(renderer) {
         // render frame
-        renderer.render(this._scene, this._camera);
+        renderer.render(this._scene, this._activeController.getCamera());
     }
 
     dispose() {
@@ -486,9 +492,27 @@ export class TerrainScene {
     }
 
     // Event call back functions
+    onActiveControllerChange() {
+        if (this._activeController !== null) {
+            this._activeController.setActive(false);
+        }
+        switch(this._sceneParams.activeController) {
+            case "Orbit":
+                this._activeController = this._entities['orbit-controller'];
+                break;
+            case "FPS":
+                this._activeController = this._entities['fps-controller'];
+                break;
+            default:
+                this._activeController = this._entities['orbit-controller'];
+                break;
+        }
+        this._activeController.setActive(true);
+    }
+
     onWindowResize() {
         // Update camera
-        this._camera.aspect = window.innerWidth / window.innerHeight;
-        this._camera.updateProjectionMatrix();
+        this._entities['orbit-controller'].onWindowResize();
+        this._entities['fps-controller'].onWindowResize();
     }
 }

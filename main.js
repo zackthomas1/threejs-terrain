@@ -18,9 +18,6 @@ class Application {
         }; 
         this._gui = new GUI();
 
-        const generalRollup = this._gui.addFolder('General');
-        generalRollup.close();
-
         // create terrain scene
         this._terrainScene = new TerrainScene({
             gui : this._gui,
