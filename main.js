@@ -19,7 +19,7 @@ class Application {
         this._gui = new GUI();
 
         const generalRollup = this._gui.addFolder('General');
-        generalRollup.close
+        generalRollup.close();
 
         // create terrain scene
         this._terrainScene = new TerrainScene({
@@ -34,7 +34,7 @@ class Application {
         this._renderer  = new THREE.WebGPURenderer({ antialias: true });
         this._renderer.setSize(window.innerWidth, window.innerHeight);
         this._renderer.setAnimationLoop(() => this._update());
-        CONFIG.CANVASS_TARGET.appendChild(this._renderer.domElement); // add renderer element to HTML document
+        CONFIG.CANVAS_TARGET.appendChild(this._renderer.domElement); // add renderer element to HTML document
 
     }
 

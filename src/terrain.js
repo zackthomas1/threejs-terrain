@@ -591,7 +591,7 @@ export class TerrainScene {
         this._camera    = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
 
         // set up orbit controls
-        this._controls = new OrbitControls(this._camera, CONFIG.CANVASS_TARGET);
+        this._controls = new OrbitControls(this._camera, CONFIG.CANVAS_TARGET);
         this._controls.enableDamping = true;
         this._controls.dampingFactor = 0.05;
 
