@@ -337,9 +337,9 @@ class TerrainChunkManager {
         }
     }
 
-    update(deltaTime) {
-        // TODO: Implement update function 
-        return
+    update(_deltaTime) {
+        // No per-frame updates yet; keep for interface parity with other entities.
+        return;
     }
 }
 
@@ -478,7 +478,7 @@ class TerrainAtmosphere {
 
     update(deltaTime) {
         // TODO: Implement update function 
-        return
+        return;
     }
 
     // event handlers
@@ -618,5 +618,12 @@ export class TerrainScene {
     render(renderer) {
         // render frame
         renderer.render(this._scene, this._camera);
+    }
+
+    // Event call back functions
+    onWindowResize() {
+        // Update camera
+        this._camera.aspect = window.innerWidth / window.innerHeight;
+        this._camera.updateProjectionMatrix();
     }
 }

@@ -35,6 +35,7 @@ class Application {
         this._renderer.setSize(window.innerWidth, window.innerHeight);
         this._renderer.setAnimationLoop(() => this._update());
         CONFIG.CANVASS_TARGET.appendChild(this._renderer.domElement); // add renderer element to HTML document
+
     }
 
     _update() {
@@ -45,18 +46,20 @@ class Application {
         this._terrainScene.render(this._renderer);
     }
 
+
     onWindowResize() {
-        // Update camera
-        this._terrainScene._camera.aspect = window.innerWidth / window.innerHeight;
-        this._terrainScene._camera.updateProjectionMatrix();
-        
+        // Update scene camera
+        this._terrainScene.onWindowResize();
+
         // Update renderer
         this._renderer.setSize(window.innerWidth, window.innerHeight);
     }
 }
 
+// Entry point
 function _Main() {
     const app = new Application();
+    
     window.addEventListener('resize', () => app.onWindowResize());
 }
 
