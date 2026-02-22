@@ -12,7 +12,7 @@ const HEMISPHERE_LIGHT_SKY_COLOR = '#bbf7ff';
 const HEMISPHERE_LIGHT_GROUND_COLOR = '#33335f';
 const SUNLIGHT_INTENSITY = 2.0;
 const FILL_LIGHT_INTENSITY = 1.0;
-const HEMISPHERE__LIGHT_INTENSITY = 0.6;
+const HEMISPHERE_LIGHT_INTENSITY = 0.6;
 const SUNLIGHT_DISTANCE = 256;
 
 class HeightMap {
@@ -21,13 +21,13 @@ class HeightMap {
 
     constructor(params) {
         if (!params || !Number.isFinite(params.chunkSize) || params.chunkSize < 1) {
-            throw new Error('HeightMap._initialize: params.chunkSize must be a positive number.');
+            throw new Error('HeightMap.constructor: params.chunkSize must be a positive number.');
         }
         if (!Number.isFinite(params.chunkSegments) || params.chunkSegments < 1) {
-            throw new Error('HeightMap._initialize: params.chunkSegments must be a positive number.');
+            throw new Error('HeightMap.constructor: params.chunkSegments must be a positive number.');
         }
         if (!params.material) {
-            throw new Error('HeightMap._initialize: missing params.material.');
+            throw new Error('HeightMap.constructor: missing params.material.');
         }
         
         // UV setup for heightmap sampling: map local space [-(chunkSize/2), (chunkSize/2)] to UV [0,1])
@@ -122,6 +122,7 @@ class TerrainChunk {
     _mesh                   = null;
     _material               = null;
     _heightMap              = null;
+    _heightMapTexture       = null;
     _materialNodes          = {};
 
     constructor(params) {
@@ -146,6 +147,7 @@ class TerrainChunk {
             material: this._material,
             textureMap: params.heightMapTexture,
         });
+        this._heightMapTexture = params.heightMapTexture;
 
         // Debug Visualization
         // Create a node to visualize the normal as a color (0..1 range)
@@ -179,7 +181,44 @@ class TerrainChunk {
             throw new Error('TerrainChunk.setTexture: height map is not initialized');
         }
 
+        if (texture === null) {
+            throw new Error('TerrainChunk.setTexture: texture is required');
+        }
+
+        const oldTexture = this._heightMapTexture;
+        if (oldTexture === texture) {
+            return;
+        }
+
         this._heightMap.setTexture(texture);
+        this._heightMapTexture = texture;
+        if (oldTexture) {
+            oldTexture.dispose();
+        }
+    }
+
+    dispose() {
+        if (this._mesh?.parent) {
+            this._mesh.parent.remove(this._mesh);
+        }
+
+        if (this._mesh?.geometry) {
+            this._mesh.geometry.dispose();
+        }
+
+        if (this._heightMapTexture) {
+            this._heightMapTexture.dispose();
+            this._heightMapTexture = null;
+        }
+
+        if (this._material) {
+            this._material.dispose();
+        }
+
+        this._heightMap = null;
+        this._materialNodes = {};
+        this._mesh = null;
+        this._material = null;
     }
 }
 
@@ -360,6 +399,22 @@ class TerrainChunkManager {
         // No per-frame updates yet; keep for interface parity with other entities.
         return;
     }
+
+    dispose() {
+        for (const k in this._chunks) {
+            const chunk = this._chunks[k];
+            chunk.dispose();
+        }
+
+        this._chunks = {};
+
+        if (this._group?.parent) {
+            this._group.parent.remove(this._group);
+        }
+
+        this._group = null;
+        this._noiseGenerator = null;
+    }
 }
 
 class TerrainAtmosphere {
@@ -385,7 +440,7 @@ class TerrainAtmosphere {
             rayleigh: 0.3,
             mieCoefficient: 0.005,
             mieDirectionalG: 0.6,
-            lumminance: 1,
+            luminance: 1,
         }; 
 
         params.guiParams.sun = { 
@@ -419,7 +474,7 @@ class TerrainAtmosphere {
             .onChange(() => { this.onSunSkyChange(); });
         skyRollup.add(params.guiParams.sky, "mieDirectionalG", 0.0, 1.0)
             .onChange(() => { this.onSunSkyChange(); });
-        skyRollup.add(params.guiParams.sky, "lumminance", 0.0, 2.0)
+        skyRollup.add(params.guiParams.sky, "luminance", 0.0, 2.0)
             .onChange(() => { this.onSunSkyChange(); });
 
         // sun
@@ -476,7 +531,7 @@ class TerrainAtmosphere {
         params.lights.push(fillLight);
 
         // hemisphere light
-        const hemiLight = new THREE.HemisphereLight(HEMISPHERE_LIGHT_SKY_COLOR, HEMISPHERE_LIGHT_GROUND_COLOR, HEMISPHERE__LIGHT_INTENSITY);
+        const hemiLight = new THREE.HemisphereLight(HEMISPHERE_LIGHT_SKY_COLOR, HEMISPHERE_LIGHT_GROUND_COLOR, HEMISPHERE_LIGHT_INTENSITY);
         params.lights.push(hemiLight);
 
         // Add light helpers for visualization
@@ -489,7 +544,7 @@ class TerrainAtmosphere {
         const hemiLightHelper = new THREE.HemisphereLightHelper(hemiLight, 256);
         params.scene.add(hemiLightHelper);
 
-        // Initialize atmoshphere
+        // Initialize atmosphere 
         this.onSunSkyChange();
         this.onFogChange();
         this._atmosphereHost.setFog(this._fogParams.enable ? this._fog : null);
@@ -530,6 +585,9 @@ class TerrainAtmosphere {
             }
             if (this._sky.mieDirectionalG?.value !== undefined) {
                 this._sky.mieDirectionalG.value = this._skyParams.mieDirectionalG;
+            }
+            if (this._sky.luminance?.value !== undefined) {
+                this._sky.luminance.value = this._skyParams.luminance;
             }
         }
 
@@ -637,6 +695,15 @@ export class TerrainScene {
     render(renderer) {
         // render frame
         renderer.render(this._scene, this._camera);
+    }
+
+    dispose() {
+        for (const k in this._entities) {
+            const entity = this._entities[k];
+            if (typeof entity?.dispose === 'function') {
+                entity.dispose();
+            }
+        }
     }
 
     // Event call back functions

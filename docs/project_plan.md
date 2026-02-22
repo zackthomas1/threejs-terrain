@@ -9,7 +9,7 @@
 
 - [x] **Heightmap Sampling**: Implement heightmap sampling with bilinear filtering in the shader to prevent blocky artifacts (stair-stepping) when the camera is close to the surface.
 
-## Phase 2. Applying perlin nose and fractional brownian motion 
+## Phase 2. Applying perlin noise and fractional brownian motion 
 Transition from simple noise to complex, multi-scale terrain.
 
 - [x] **Implement Terrain Chunking**: Create TerrainChunk that encapulates. New Terrain Chunks instantiated to generate new terrain as camera moves through scene

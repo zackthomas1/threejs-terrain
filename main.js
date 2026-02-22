@@ -46,7 +46,6 @@ class Application {
         this._terrainScene.render(this._renderer);
     }
 
-
     onWindowResize() {
         // Update scene camera
         this._terrainScene.onWindowResize();
