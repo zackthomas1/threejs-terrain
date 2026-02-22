@@ -1,3 +1,5 @@
+
+import * as PERLIN from 'https://cdn.jsdelivr.net/gh/mikechambers/es6-perlin-module@master/perlin.js';
 import { createNoise2D, createNoise3D } from 'simplex-noise';
 import { mulberry32 } from './util'
 
@@ -19,17 +21,22 @@ class SimplexGenerator {
 
 class PerlinGenerator {
     constructor(seed = Date.now()) {
-        // TODO: Perlin noise immplementation
+        const random = mulberry32(seed);
+        this.offsetX = random() * 10000;
+        this.offsetY = random() * 10000;
+        this.offsetZ = random() * 10000;
     }
 
     get2D(x, y) {
-        // TODO: implement 2D perlin
-        return 0.0;
+        return PERLIN.noise2(x + this.offsetX, y + this.offsetY) * 2.0 - 1.0;
     }
 
     get3D(x, y, z) {
-        // TODO: implement 2D perlin
-        return 0.0;
+        return PERLIN.noise3(
+            x + this.offsetX,
+            y + this.offsetY,
+            z + this.offsetZ
+        ) * 2.0 - 1.0;
     }
 }
 
