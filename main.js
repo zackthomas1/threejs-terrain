@@ -5,6 +5,11 @@ import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
 import { NoiseGenerator } from './noise';
 import GUI from 'lil-gui';
 
+const TERRAIN_ROOT = document.getElementById('terrain-root');
+if (!TERRAIN_ROOT) {
+    throw new Error('Missing required DOM element: #terrain-root');
+}
+
 class HeightMap {
     _heightmapNode      = null;
     _resolutionUniform  = null;
@@ -177,7 +182,7 @@ class TerrainChunkManager {
             persistence: 0.5,
             lacunarity: 2.0,
             exponentiation: 3.9,
-            height: 64,
+            height: 64.0,
             seed: 1
         }
 
@@ -186,7 +191,7 @@ class TerrainChunkManager {
         const noiseRollup = params.gui.addFolder("Noise"); 
         noiseRollup.add(params.guiParams.noise, "noiseType", ["simplex", "perlin"]).onFinishChange(
             () => { this.onNoiseChange(); });
-        noiseRollup.add(params.guiParams.noise, "scale", 1.0, 256.0).onFinishChange(
+        noiseRollup.add(params.guiParams.noise, "scale", 1.0, 128.0).onFinishChange(
             () => { this.onNoiseChange(); });
         noiseRollup.add(params.guiParams.noise, "octaves", 1, 16, 1).onFinishChange(
             () => { this.onNoiseChange(); });
@@ -335,36 +340,34 @@ class TerrainChunkManager {
 }
 
 const SKYBOXSCALE = 10000;
+const SUNLIGHTCOLOR = '#FFFFFF'
+const FILL_LIGHT_COLOR = '#dfe8f2';
+const HEMISPHERE_LIGHT_SKY_COLOR = '#bbf7ff';
+const HEMISPHERE_LIGHT_GROUND_COLOR = '#33335f';
+const SUNLIGHT_INTENSITY = 2.0;
+const FILL_LIGHT_INTENSITY = 1.0;
+const HEMISPHERE__LIGHT_INTENSITY = 0.6;
+const SUNLIGHT_DISTANCE = 256;
+
 class TerrainAtmosphere { 
     _sky = null;
     _fog = null;
     _atmosphereHost = null;
-    _skyParams = {};
-    _sunParams = {};
-    _fogParams = {};
+    _skyParams  = {};
+    _sunParams  = {};
+    _fogParams  = {};
+    _sunLight   = null;
+    _fillLight  = null;
+    _sunTarget  = null;
+
 
     constructor(params) {
         // guard check params are valid
         if (typeof params.atmosphereHost?.setFog !== 'function') {
             throw new Error('TerrainAtmosphere: params.atmosphereHost.setFog must be a function.');
         }
-        if (
-            params.atmosphereHost?.setSunDirection !== undefined &&
-            typeof params.atmosphereHost.setSunDirection !== 'function'
-        ) {
-            throw new Error('TerrainAtmosphere: params.atmosphereHost.setSunDirection must be a function when provided.');
-        }
 
-        // Setup Sky
-        this._sky = new SkyMesh();
-        this._sky.scale.setScalar(SKYBOXSCALE);
-        params.scene.add(this._sky);
-
-        // Setup atmospheric fog
-        this._fog = new THREE.Fog(this._fogParams.color, this._fogParams.near, this._fogParams.far);
-        this._atmosphereHost = params.atmosphereHost;
-
-        // Setup gui controls for sun and sky
+        // Setup GUI controls for sun and sky
         params.guiParams.sky = { 
             turbidity: 0.2,
             rayleigh: 0.3,
@@ -374,8 +377,9 @@ class TerrainAtmosphere {
         }; 
 
         params.guiParams.sun = { 
-            inclination: 80.0,
-            azimuth: 0.25,
+            intensity: 7.0,
+            inclination: 35.0,
+            azimuth: 242.0,
         };
 
         params.guiParams.fog = {
@@ -394,6 +398,7 @@ class TerrainAtmosphere {
         const sunRollup = atmosphereRollup.addFolder("Sun");
         const fogRollup = atmosphereRollup.addFolder("Fog");
 
+        // sky
         skyRollup.add(params.guiParams.sky, "turbidity", 0.01, 1.0)
             .onChange(() => { this.onSunSkyChange(); });
         skyRollup.add(params.guiParams.sky, "rayleigh", 0.01, 1.0)
@@ -405,6 +410,10 @@ class TerrainAtmosphere {
         skyRollup.add(params.guiParams.sky, "lumminance", 0.0, 2.0)
             .onChange(() => { this.onSunSkyChange(); });
 
+        // sun
+        sunRollup.add(params.guiParams.sun, "intensity", 1.0, 10.0)
+            .onChange(() => { this.onSunSkyChange(); })
+            .name("intensity");
         sunRollup.add(params.guiParams.sun, "inclination", 0.0, 180.0)
             .onChange(() => { this.onSunSkyChange(); })
             .name("inclination (degrees)");;
@@ -412,6 +421,7 @@ class TerrainAtmosphere {
             .onChange(() => { this.onSunSkyChange(); })
             .name("azimuth (degrees)");
 
+        // fog
         fogRollup.add(params.guiParams.fog, "enable", true)
             .onChange(() => { this._atmosphereHost.setFog(this._fogParams.enable ? this._fog : null); })
             .name("enabled");
@@ -425,6 +435,48 @@ class TerrainAtmosphere {
             .onChange(() => { this.onFogChange(); })
             .name("far clip");
 
+        // Setup Sky
+        this._sky = new SkyMesh();
+        this._sky.scale.setScalar(SKYBOXSCALE);
+        params.scene.add(this._sky);
+
+        // Setup atmospheric fog
+        this._fog = new THREE.Fog(this._fogParams.color, this._fogParams.near, this._fogParams.far);
+        this._atmosphereHost = params.atmosphereHost;
+
+        // create lights
+        // Sun light
+        this._sunTarget = new THREE.Object3D();
+        this._sunTarget.position.set(0, 0, 0);
+
+        const light = new THREE.DirectionalLight(SUNLIGHTCOLOR, SUNLIGHT_INTENSITY);
+        params.scene.add(this._sunTarget);
+        light.target = this._sunTarget;
+        light.position.set(-1, 2, 4);
+        this._sunLight = light;
+        params.lights.push(light);
+
+        // fill light
+        const fillLight = new THREE.DirectionalLight(FILL_LIGHT_COLOR, FILL_LIGHT_INTENSITY);
+        fillLight.target = this._sunTarget;
+        fillLight.position.set(1, -2, -4);
+        this._fillLight = fillLight;
+        params.lights.push(fillLight);
+
+        // hemisphere light
+        const hemiLight = new THREE.HemisphereLight(HEMISPHERE_LIGHT_SKY_COLOR, HEMISPHERE_LIGHT_GROUND_COLOR, HEMISPHERE__LIGHT_INTENSITY);
+        params.lights.push(hemiLight);
+
+        // Add light helpers for visualization
+        const sunLightHelper = new THREE.DirectionalLightHelper(this._sunLight, 20);
+        params.scene.add(sunLightHelper);
+        
+        const fillLightHelper = new THREE.DirectionalLightHelper(this._fillLight, 20);
+        params.scene.add(fillLightHelper);
+
+        const hemiLightHelper = new THREE.HemisphereLightHelper(hemiLight, 256);
+        params.scene.add(hemiLightHelper);
+
         // Initialize atmoshphere
         this.onSunSkyChange();
         this.onFogChange();
@@ -437,17 +489,6 @@ class TerrainAtmosphere {
     }
 
     // event handlers
-    onFogChange() { 
-        if (!this._fog) {
-            return;
-        }
-
-        // Ensure color assignment works with number or Color input
-        this._fog.color.set(this._fogParams.color);
-        this._fog.near = this._fogParams.near;
-        this._fog.far = this._fogParams.far;
-    }
-
     onSunSkyChange() {
         
         // Inclination is the vertical angle (0 = bottom, PI/2 = horizon, PI = top)
@@ -480,38 +521,120 @@ class TerrainAtmosphere {
             }
         }
 
-        this._atmosphereHost.setSunDirection?.(sunPosition);
+        // update sun position
+        ((position) => {
+            if (!this._sunLight || !this._fillLight || !this._sunTarget || !position) {
+                console.error("Missing required sunLight or fillLight");
+                return;
+            }
+
+            // Position sun light
+            this._sunLight.position.copy(
+                position.clone().multiplyScalar(SUNLIGHT_DISTANCE)
+            );
+
+            // Position fill light: same height (Y), rotated 180° around Y-axis
+            // Rotation around Y-axis: (x, y, z) -> (-x, y, -z)
+            const fillDirection = new THREE.Vector3(
+                -position.x,
+                position.y,
+                -position.z
+            );
+            this._fillLight.position.copy(
+                fillDirection.multiplyScalar(SUNLIGHT_DISTANCE)
+            );
+
+            this._sunTarget.position.set(0, 0, 0);
+            this._sunTarget.updateMatrixWorld();
+        })(sunPosition);
+
+        if (this._sunLight && this._fillLight) {
+            this._sunLight.intensity = this._sunParams.intensity;
+            this._fillLight.intensity = this._sunParams.intensity * 0.6;
+        }
+    }
+
+    onFogChange() { 
+        if (!this._fog) {
+            return;
+        }
+
+        // Ensure color assignment works with number or Color input
+        this._fog.color.set(this._fogParams.color);
+        this._fog.near = this._fogParams.near;
+        this._fog.far = this._fogParams.far;
     }
 }
 
 class TerrainScene {
+    _entities    = {};
+    _scene      = null;
+    _camera     = null;
+    _controls   = null;
+    _lights     = [];
 
+    constructor(params) {
+    // set up scene and camera
+        this._scene     = new THREE.Scene();
+        this._camera    = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+
+        // set up orbit controls
+        this._controls = new OrbitControls(this._camera, TERRAIN_ROOT);
+        this._controls.enableDamping = true;
+        this._controls.dampingFactor = 0.05;
+
+        // Position camera
+        this._camera.position.z = 10;
+        this._camera.position.y = 30;
+
+        // Create sun and sky
+        this._entities['atmosphere'] = new TerrainAtmosphere({
+            scene : this._scene,
+            gui : params.gui,
+            guiParams : params.guiParams,
+            lights: this._lights,
+            atmosphereHost : {
+                setFog: (fogOrNull) => {
+                    this._scene.fog = fogOrNull;
+                },
+            }
+        });
+
+        // Create terrain
+        this._entities['terrain'] = new TerrainChunkManager({
+            scene : this._scene,
+            gui : params.gui,
+            guiParams : params.guiParams
+        });
+
+        // Add all lights to scene
+        this._lights.forEach((light) => { this._scene.add(light); });
+    }
+
+    update(deltaTime) {
+        // update camera controls
+        this._controls.update();
+
+        // update entities
+        for (const k in this._entities) {
+            const entity = this._entities[k];
+            entity.update(deltaTime);
+        }
+    }
+
+    render(renderer) {
+        // render frame
+        renderer.render(this._scene, this._camera);
+    }
 }
 
-const SUNLIGHTCOLOR = '#FFFFFF'
-const FILL_LIGHT_COLOR = '#dfe8f2';
-const HEMISPHERE_LIGHT_SKY_COLOR = '#bbf7ff';
-const HEMISPHERE_LIGHT_GROUND_COLOR = '#33335f';
-
-const SUNLIGHT_INTENSITY = 2.0;
-const FILL_LIGHT_INTENSITY = 1.0;
-const HEMISPHERE__LIGHT_INTENSITY = 1.0;
-const SUNLIGHT_DISTANCE = 512;
 class Application {
     _gui        = null;
     _guiParams  = {};
 
-    _entites    = {};
-
-    _renderer   = null;
-    _scene      = null;
-    _camera     = null;
-    _lights     = [];
-    _sunLight   = null;
-    _fillLight  = null;
-    _sunTarget  = null;
-    _controls   = null;
-    _clock      = null;
+    _renderer       = null;
+    _clock          = null;
+    _terrainScene   = null;
 
     constructor() {
         // initialize gui
@@ -521,6 +644,13 @@ class Application {
         this._gui = new GUI();
 
         const generalRollup = this._gui.addFolder('General');
+        generalRollup.close
+
+        // create terrain scene
+        this._terrainScene = new TerrainScene({
+            gui : this._gui,
+            guiParams : this._guiParams
+        });
 
         // set up clock
         this._clock     = new THREE.Clock();
@@ -529,130 +659,21 @@ class Application {
         this._renderer  = new THREE.WebGPURenderer({ antialias: true });
         this._renderer.setSize(window.innerWidth, window.innerHeight);
         this._renderer.setAnimationLoop(() => this._update());
-        document.body.appendChild(this._renderer.domElement); // add renderer element to HTML document
-
-        // set up scene and camera
-        this._scene     = new THREE.Scene();
-        this._camera    = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-
-        // set up orbit controls
-        this._controls = new OrbitControls(this._camera, this._renderer.domElement);
-        this._controls.enableDamping = true;
-        this._controls.dampingFactor = 0.05;
-
-        // Position camera
-        this._camera.position.z = 10;
-        this._camera.position.y = 30;
-
-        // create lights
-        // Sun light
-        this._sunTarget = new THREE.Object3D();
-        this._sunTarget.position.set(0, 0, 0);
-
-        const light = new THREE.DirectionalLight(SUNLIGHTCOLOR, SUNLIGHT_INTENSITY);
-        this._scene.add(this._sunTarget);
-        light.target = this._sunTarget;
-        light.position.set(-1, 2, 4);
-        this._sunLight = light;
-        this._lights.push(light);
-
-        // fill light
-        const fillLight = new THREE.DirectionalLight(FILL_LIGHT_COLOR, FILL_LIGHT_INTENSITY);
-        fillLight.target = this._sunTarget;
-        fillLight.position.set(1, -2, -4);
-        this._fillLight = fillLight;
-        this._lights.push(fillLight);
-
-        // hemisphere light
-        const hemiLight = new THREE.HemisphereLight(HEMISPHERE_LIGHT_SKY_COLOR, HEMISPHERE_LIGHT_GROUND_COLOR, HEMISPHERE__LIGHT_INTENSITY);
-        this._lights.push(hemiLight);
-
-        this._lights.forEach((light) => { this._scene.add(light); });
-
-        // Add light helpers for visualization
-        const sunLightHelper = new THREE.DirectionalLightHelper(this._sunLight, 40);
-        sunLightHelper.targetLine = 100;
-        this._scene.add(sunLightHelper);
-        
-        const fillLightHelper = new THREE.DirectionalLightHelper(this._fillLight, 40);
-        fillLightHelper.targetLine = 100;
-        this._scene.add(fillLightHelper);
-
-        // set scene background
-        this._scene.background = new THREE.Color(0x667789);
-
-        // Create sun and sky
-        this._entites['atmosphere'] = new TerrainAtmosphere({
-            scene : this._scene,
-            gui : this._gui,
-            guiParams : this._guiParams,
-            atmosphereHost : {
-                setFog: (fogOrNull) => {
-                    this._scene.fog = fogOrNull;
-                },
-                setSunDirection: (sunDirection) => {
-                    if (!this._sunLight || !this._fillLight || !this._sunTarget || !sunDirection) {
-                        console.error("setSunDirection missing required sunLight or fillLight");
-                        return;
-                    }
-
-                    // Position sun light
-                    this._sunLight.position.copy(
-                        sunDirection.clone().multiplyScalar(SUNLIGHT_DISTANCE)
-                    );
-
-                    // Position fill light: same height (Y), rotated 180° around Y-axis
-                    // Rotation around Y-axis: (x, y, z) -> (-x, y, -z)
-                    const fillDirection = new THREE.Vector3(
-                        -sunDirection.x,
-                        sunDirection.y,
-                        -sunDirection.z
-                    );
-                    this._fillLight.position.copy(
-                        fillDirection.multiplyScalar(SUNLIGHT_DISTANCE)
-                    );
-
-                    this._sunTarget.position.set(0, 0, 0);
-                    this._sunTarget.updateMatrixWorld();
-                }
-            }
-        });
-
-        // Create terrain
-        this._entites['terrain'] = new TerrainChunkManager({
-            scene : this._scene,
-            gui : this._gui,
-            guiParams : this._guiParams
-        });
-        
+        TERRAIN_ROOT.appendChild(this._renderer.domElement); // add renderer element to HTML document
     }
 
     _update() {
-        // update controls
-        this._controls.update();
-
         const deltaTime = this._clock.getDelta();
-        const elapsedTime = this._clock.getElapsedTime();
+        // const elapsedTime = this._clock.getElapsedTime();
 
-        // update entities
-        for (const k in this._entites) {
-            const entity = this._entites[k];
-            entity.update(deltaTime);
-        }
-
-        // this._lights.forEach((light) => {
-        //     light.position.x = Math.sin(elapsedTime) * 4;
-        //     light.position.z = Math.sin(elapsedTime) * 4;
-        // });
-
-        // render frame
-        this._renderer.render(this._scene, this._camera);
+        this._terrainScene.update(deltaTime);
+        this._terrainScene.render(this._renderer);
     }
 
     onWindowResize() {
         // Update camera
-        this._camera.aspect = window.innerWidth / window.innerHeight;
-        this._camera.updateProjectionMatrix();
+        this._terrainScene._camera.aspect = window.innerWidth / window.innerHeight;
+        this._terrainScene._camera.updateProjectionMatrix();
         
         // Update renderer
         this._renderer.setSize(window.innerWidth, window.innerHeight);
