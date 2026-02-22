@@ -1,6 +1,6 @@
 import * as THREE from 'three/webgpu';
 import GUI from 'lil-gui';
-import {TerrainScene} from './src/terrain';
+import {TerrainScene} from './src/terrain/terrain';
 import * as CONFIG from './src/config';
 
 class Application {
