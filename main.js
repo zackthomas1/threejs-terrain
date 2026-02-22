@@ -29,13 +29,20 @@ class Application {
 
         // set up clock
         this._clock     = new THREE.Clock();
+    }
 
-        // set up renderer
-        this._renderer  = new THREE.WebGPURenderer({ antialias: true });
+    async init() {
+        await this._initRenderer();
+    }
+
+    async _initRenderer() {
+        this._renderer = new THREE.WebGPURenderer({ antialias: true });
         this._renderer.setSize(window.innerWidth, window.innerHeight);
-        this._renderer.setAnimationLoop(() => this._update());
-        CONFIG.CANVAS_TARGET.appendChild(this._renderer.domElement); // add renderer element to HTML document
 
+        await this._renderer.init();
+
+        CONFIG.CANVAS_TARGET.appendChild(this._renderer.domElement);
+        this._renderer.setAnimationLoop(() => this._update());
     }
 
     _update() {
@@ -47,6 +54,10 @@ class Application {
     }
 
     onWindowResize() {
+        if (!this._renderer) {
+            return;
+        }
+
         // Update scene camera
         this._terrainScene.onWindowResize();
 
@@ -56,10 +67,13 @@ class Application {
 }
 
 // Entry point
-function _Main() {
+async function _Main() {
     const app = new Application();
+    await app.init();
     
     window.addEventListener('resize', () => app.onWindowResize());
 }
 
-_Main();
+_Main().catch((error) => {
+    console.error('Failed to initialize application:', error);
+});

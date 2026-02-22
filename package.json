@@ -6,9 +6,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "lil-gui": "^0.20.0",
+    "lil-gui": "^0.21.0",
     "simplex-noise": "^4.0.3",
-    "three": "^0.173.0"
+    "three": "^0.183.1"
   },
   "devDependencies": {
     "eslint": "^10.0.0",
