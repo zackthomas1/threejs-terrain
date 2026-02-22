@@ -5,6 +5,16 @@ import { NoiseGenerator } from './noise';
 import * as TSL from 'three/tsl';
 import * as CONFIG from './config';
 
+const SKYBOXSCALE = 10000;
+const SUNLIGHTCOLOR = '#FFFFFF'
+const FILL_LIGHT_COLOR = '#dfe8f2';
+const HEMISPHERE_LIGHT_SKY_COLOR = '#bbf7ff';
+const HEMISPHERE_LIGHT_GROUND_COLOR = '#33335f';
+const SUNLIGHT_INTENSITY = 2.0;
+const FILL_LIGHT_INTENSITY = 1.0;
+const HEMISPHERE__LIGHT_INTENSITY = 0.6;
+const SUNLIGHT_DISTANCE = 256;
+
 class HeightMap {
     _heightmapNode      = null;
     _resolutionUniform  = null;
@@ -26,15 +36,34 @@ class HeightMap {
         // TSL Terrain Material Node configuration
         // Setup heightmap texture and sample from heightmap
         this._heightmapNode = TSL.texture(params.textureMap);
-        // Resolution uniform matches texture size (segments + 1)
-        const textureResolution = params.textureMap.image?.width || (params.chunkSegments + 1);
+        // Resolution uniform matches texture size (segments + 3 with a 1-texel padding border)
+        const textureResolution = params.textureMap.image?.width || (params.chunkSegments + 3);
         this._resolutionUniform = TSL.uniform(textureResolution);
-        const sample = this._bilinearSample(this._heightmapNode, uv, this._resolutionUniform);
 
-        // Calculate analytic normal
+        // Remap chunk UV into the texture interior [1, resolution-2] so border texels are used only for gradients
+        const uvSamplingScale = (textureResolution - 3) / (textureResolution - 1);
+        const uvSamplingOffset = 1.0 / (textureResolution - 1);
+        const uvSample = uv.mul(uvSamplingScale).add(uvSamplingOffset);
+
+        const sample = this._bilinearSample(this._heightmapNode, uvSample, this._resolutionUniform);
+
+        // Displace terrain vertices using sampled height
         params.material.positionNode = TSL.positionLocal.add(TSL.vec3(0, 0, sample));
-        const pos = params.material.positionNode;
-        params.material.normalNode = TSL.cross(TSL.dFdx(pos), TSL.dFdy(pos)).normalize();
+
+        // Compute normal from local-space height gradient for stable smooth shading
+        const uvTexelStep = TSL.float(1.0).div(this._resolutionUniform.sub(1.0));
+        const uvOffsetX = TSL.vec2(uvTexelStep, 0.0);
+        const uvOffsetY = TSL.vec2(0.0, uvTexelStep);
+
+        const hL = this._bilinearSample(this._heightmapNode, uvSample.sub(uvOffsetX), this._resolutionUniform);
+        const hR = this._bilinearSample(this._heightmapNode, uvSample.add(uvOffsetX), this._resolutionUniform);
+        const hD = this._bilinearSample(this._heightmapNode, uvSample.sub(uvOffsetY), this._resolutionUniform);
+        const hU = this._bilinearSample(this._heightmapNode, uvSample.add(uvOffsetY), this._resolutionUniform);
+
+        const localGridStep = (params.chunkSize / params.chunkSegments) * 2.0;
+        const tangentX = TSL.vec3(localGridStep, 0.0, hR.sub(hL));
+        const tangentY = TSL.vec3(0.0, localGridStep, hU.sub(hD));
+        params.material.normalNode = TSL.cross(tangentX, tangentY).normalize();
     }
 
     // Manual Bilinear Filtering implementation in TSL: 
@@ -154,16 +183,6 @@ class TerrainChunk {
     }
 }
 
-export const SKYBOXSCALE = 10000;
-export const SUNLIGHTCOLOR = '#FFFFFF'
-export const FILL_LIGHT_COLOR = '#dfe8f2';
-export const HEMISPHERE_LIGHT_SKY_COLOR = '#bbf7ff';
-export const HEMISPHERE_LIGHT_GROUND_COLOR = '#33335f';
-export const SUNLIGHT_INTENSITY = 2.0;
-export const FILL_LIGHT_INTENSITY = 1.0;
-export const HEMISPHERE__LIGHT_INTENSITY = 0.6;
-export const SUNLIGHT_DISTANCE = 256;
-
 class TerrainChunkManager {
     _group      = null;
     _chunks     = {};
@@ -182,11 +201,11 @@ class TerrainChunkManager {
         params.guiParams.noise = {
             noiseType: 'simplex',
             scale: 64.0,
-            octaves: 10,
+            octaves: 6,
             persistence: 0.5,
             lacunarity: 2.0,
             exponentiation: 3.9,
-            height: 64.0,
+            height: 32.0,
             seed: 1
         }
 
@@ -197,7 +216,7 @@ class TerrainChunkManager {
             () => { this.onNoiseChange(); });
         noiseRollup.add(params.guiParams.noise, "scale", 1.0, 128.0).onFinishChange(
             () => { this.onNoiseChange(); });
-        noiseRollup.add(params.guiParams.noise, "octaves", 1, 16, 1).onFinishChange(
+        noiseRollup.add(params.guiParams.noise, "octaves", 1, 8, 1).onFinishChange(
             () => { this.onNoiseChange(); });
         noiseRollup.add(params.guiParams.noise, "persistence", 0.01, 1.0).onFinishChange(
             () => { this.onNoiseChange(); });
@@ -222,10 +241,10 @@ class TerrainChunkManager {
         const terrainRollup = params.gui.addFolder("Terrain");
         terrainRollup.add({ wireframe: false }, 'wireframe')
             .onChange(() => { this.onWireframe(); })
-            .name('Wireframe');
+            .name('Display wireframe');
         terrainRollup.add({ normals: false }, 'normals')
             .onChange(() => { this.onNormals(); })
-            .name('Show Normals');
+            .name('Display normals');
 
         // create mesh group and add to scene
         this._group = new THREE.Group();
@@ -241,18 +260,18 @@ class TerrainChunkManager {
     }
 
     _generateHeightMapTexture(x,y) {
-        // PlaneGeometry with N segments has (N+1) vertices per axis
-        // Texture resolution must match vertex count for proper edge continuity
-        const resolution = this._chunkSegements + 1;
+        // PlaneGeometry with N segments has (N+1) vertices per axis.
+        // Add a 1-texel border on each side so edge normals can sample central differences across chunk seams.
+        const resolution = this._chunkSegements + 3;
+        const sampleStep = this._chunkSize / this._chunkSegements;
         const data = new Float32Array(resolution * resolution);
         
         // DataTexture data is row-major: data[row * width + col] = data[y * width + x]
         for (let row = 0; row < resolution; row++) {
-            // Calculate world-space Y position (row index maps to Y axis)
-            const worldY = (y * this._chunkSize) - (this._chunkSize / 2) + (row * this._chunkSize / this._chunkSegements);
+            // Row 0 starts one sample outside the chunk, then covers all vertex samples, then one sample outside.
+            const worldY = (y * this._chunkSize) - (this._chunkSize / 2) - sampleStep + (row * sampleStep);
             for (let col = 0; col < resolution; col++) {
-                // Calculate world-space X position (column index maps to X axis)
-                const worldX = (x * this._chunkSize) - (this._chunkSize / 2) + (col * this._chunkSize / this._chunkSegements);
+                const worldX = (x * this._chunkSize) - (this._chunkSize / 2) - sampleStep + (col * sampleStep);
                 data[(row * resolution) + col] = this._noiseGenerator.get2D(worldX, worldY);
             }
         }

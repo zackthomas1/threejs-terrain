@@ -1,9 +1,11 @@
 import { createNoise2D, createNoise3D } from 'simplex-noise';
+import { mulberry32 } from './util'
 
 class SimplexGenerator {
     constructor(seed = Date.now()) {
-        this.noise2D = createNoise2D(() => seed);
-        this.noise3D = createNoise3D(() => seed);
+        const random = mulberry32(seed);
+        this.noise2D = createNoise2D(random);
+        this.noise3D = createNoise3D(random);
     }
 
     get2D(x, y) {
@@ -58,7 +60,10 @@ export class NoiseGenerator {
             perlin: new PerlinGenerator(params.seed)
         };
     }
+
     setParams(params) {
+        const shouldRebuildGenerators = Number.isFinite(params.seed) && params.seed !== this._seed;
+
         this._type          = params.noiseType;
         this._scale          = params.scale;
         this._octaves        = params.octaves;
@@ -67,6 +72,13 @@ export class NoiseGenerator {
         this._exponentiation = params.exponentiation;
         this._height         = params.height;
         this._seed           = params.seed;
+
+        if (shouldRebuildGenerators) {
+            this._noise = {
+                simplex: new SimplexGenerator(this._seed),
+                perlin: new PerlinGenerator(this._seed)
+            };
+        }
     }
 
     get2D(x, y) {
