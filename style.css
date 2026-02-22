@@ -33,44 +33,4 @@ canvas {
     color: white;
 }
 
-#controlPanel {
-    position: absolute;
-    right: 15px;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 250px;
-    height: 66.67vh;
-    background-color: rgba(55, 69, 73, 0.8);
-    padding: 20px;
-    overflow-y: auto;
-    z-index: 100;
-    border-radius: 8px;
-}
 
-#controlPanel h3 {
-    color: #fff;
-    margin-bottom: 15px;
-    text-align: center;
-    font-size: 18px;
-}
-
-#controlPanel button {
-    width: 100%;
-    padding: 10px;
-    margin-bottom: 10px;
-    background-color: #555;
-    color: #fff;
-    border: 1px solid #777;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 14px;
-    transition: background-color 0.3s ease;
-}
-
-#controlPanel button:hover {
-    background-color: #777;
-}
-
-#controlPanel button:active {
-    background-color: #999;
-}
