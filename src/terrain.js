@@ -278,10 +278,10 @@ class TerrainChunkManager {
 
         // Create GUI Terrain rollup
         const terrainRollup = params.gui.addFolder("Terrain");
-        terrainRollup.add({ wireframe: false }, 'wireframe')
+        terrainRollup.add(params.guiParams.terrain, 'wireframe')
             .onChange(() => { this.onWireframe(); })
             .name('Display wireframe');
-        terrainRollup.add({ normals: false }, 'normals')
+        terrainRollup.add(params.guiParams.terrain, 'normals')
             .onChange(() => { this.onNormals(); })
             .name('Display normals');
 
@@ -421,12 +421,18 @@ class TerrainAtmosphere {
     _sky = null;
     _fog = null;
     _atmosphereHost = null;
+    _atmosphereRollup = null;
+    _lightGroup = null;
     _skyParams  = {};
     _sunParams  = {};
     _fogParams  = {};
     _sunLight   = null;
     _fillLight  = null;
+    _hemiLight  = null;
     _sunTarget  = null;
+    _sunLightHelper = null;
+    _fillLightHelper = null;
+    _hemiLightHelper = null;
 
     constructor(params) {
         // guard check params are valid
@@ -460,10 +466,10 @@ class TerrainAtmosphere {
         this._sunParams = params.guiParams.sun;
         this._fogParams = params.guiParams.fog;
 
-        const atmosphereRollup = params.gui.addFolder("Atmosphere");
-        const skyRollup = atmosphereRollup.addFolder("Sky");
-        const sunRollup = atmosphereRollup.addFolder("Sun");
-        const fogRollup = atmosphereRollup.addFolder("Fog");
+        this._atmosphereRollup = params.gui.addFolder("Atmosphere");
+        const skyRollup = this._atmosphereRollup.addFolder("Sky");
+        const sunRollup = this._atmosphereRollup.addFolder("Sun");
+        const fogRollup = this._atmosphereRollup.addFolder("Fog");
 
         // sky
         skyRollup.add(params.guiParams.sky, "turbidity", 0.01, 1.0)
@@ -512,37 +518,33 @@ class TerrainAtmosphere {
         this._atmosphereHost = params.atmosphereHost;
 
         // create lights
+        const lightGroup = new THREE.Group();
+        this._lightGroup = lightGroup;
+
         // Sun light
         this._sunTarget = new THREE.Object3D();
         this._sunTarget.position.set(0, 0, 0);
 
-        const light = new THREE.DirectionalLight(SUNLIGHTCOLOR, SUNLIGHT_INTENSITY);
-        params.scene.add(this._sunTarget);
-        light.target = this._sunTarget;
-        light.position.set(-1, 2, 4);
-        this._sunLight = light;
-        params.lights.push(light);
-
-        // fill light
-        const fillLight = new THREE.DirectionalLight(FILL_LIGHT_COLOR, FILL_LIGHT_INTENSITY);
-        fillLight.target = this._sunTarget;
-        fillLight.position.set(1, -2, -4);
-        this._fillLight = fillLight;
-        params.lights.push(fillLight);
+        this._sunLight = new THREE.DirectionalLight(SUNLIGHTCOLOR, SUNLIGHT_INTENSITY);
+        this._sunLight.target = this._sunTarget;
+        this._sunLight.position.set(-1, 2, 4);
+        lightGroup.add(this._sunLight);
 
         // hemisphere light
         const hemiLight = new THREE.HemisphereLight(HEMISPHERE_LIGHT_SKY_COLOR, HEMISPHERE_LIGHT_GROUND_COLOR, HEMISPHERE_LIGHT_INTENSITY);
-        params.lights.push(hemiLight);
+        this._hemiLight = hemiLight;
+        lightGroup.add(hemiLight);
 
         // Add light helpers for visualization
         const sunLightHelper = new THREE.DirectionalLightHelper(this._sunLight, 20);
-        params.scene.add(sunLightHelper);
+        this._sunLightHelper = sunLightHelper;
+        lightGroup.add(sunLightHelper);
         
-        const fillLightHelper = new THREE.DirectionalLightHelper(this._fillLight, 20);
-        params.scene.add(fillLightHelper);
-
         const hemiLightHelper = new THREE.HemisphereLightHelper(hemiLight, 256);
-        params.scene.add(hemiLightHelper);
+        this._hemiLightHelper = hemiLightHelper;
+        lightGroup.add(hemiLightHelper);
+
+        params.scene.add(lightGroup);
 
         // Initialize atmosphere 
         this.onSunSkyChange();
@@ -550,7 +552,7 @@ class TerrainAtmosphere {
         this._atmosphereHost.setFog(this._fogParams.enable ? this._fog : null);
     }
 
-    update(deltaTime) {
+    update(_deltaTime) {
         // TODO: Implement update function 
         return;
     }
@@ -593,8 +595,8 @@ class TerrainAtmosphere {
 
         // update sun position
         ((position) => {
-            if (!this._sunLight || !this._fillLight || !this._sunTarget || !position) {
-                console.error("Missing required sunLight or fillLight");
+            if (!this._sunLight || !this._sunTarget || !position) {
+                console.error("Missing required sunLight");
                 return;
             }
 
@@ -603,28 +605,17 @@ class TerrainAtmosphere {
                 position.clone().multiplyScalar(SUNLIGHT_DISTANCE)
             );
 
-            // Position fill light: same height (Y), rotated 180° around Y-axis
-            // Rotation around Y-axis: (x, y, z) -> (-x, y, -z)
-            const fillDirection = new THREE.Vector3(
-                -position.x,
-                position.y,
-                -position.z
-            );
-            this._fillLight.position.copy(
-                fillDirection.multiplyScalar(SUNLIGHT_DISTANCE)
-            );
 
             this._sunTarget.position.set(0, 0, 0);
             this._sunTarget.updateMatrixWorld();
         })(sunPosition);
 
-        if (this._sunLight && this._fillLight) {
+        if (this._sunLight) {
             this._sunLight.intensity = this._sunParams.intensity;
-            this._fillLight.intensity = this._sunParams.intensity * 0.6;
         }
     }
 
-    onFogChange() { 
+    onFogChange() {
         if (!this._fog) {
             return;
         }
@@ -634,6 +625,54 @@ class TerrainAtmosphere {
         this._fog.near = this._fogParams.near;
         this._fog.far = this._fogParams.far;
     }
+
+    dispose() {
+        this._atmosphereHost?.setFog(null);
+
+        if (this._sunLightHelper) {
+            this._sunLightHelper.parent?.remove(this._sunLightHelper);
+            this._sunLightHelper.dispose();
+            this._sunLightHelper = null;
+        }
+
+        if (this._fillLightHelper) {
+            this._fillLightHelper.parent?.remove(this._fillLightHelper);
+            this._fillLightHelper.dispose();
+            this._fillLightHelper = null;
+        }
+
+        if (this._hemiLightHelper) {
+            this._hemiLightHelper.parent?.remove(this._hemiLightHelper);
+            this._hemiLightHelper.dispose();
+            this._hemiLightHelper = null;
+        }
+
+        if (this._sky) {
+            this._sky.parent?.remove(this._sky);
+            this._sky.geometry?.dispose?.();
+            this._sky.material?.dispose?.();
+            this._sky = null;
+        }
+
+        this._sunTarget?.parent?.remove(this._sunTarget);
+        this._sunLight?.parent?.remove(this._sunLight);
+        this._fillLight?.parent?.remove(this._fillLight);
+        this._hemiLight?.parent?.remove(this._hemiLight);
+        this._lightGroup?.parent?.remove(this._lightGroup);
+
+        if (this._atmosphereRollup) {
+            this._atmosphereRollup.destroy();
+            this._atmosphereRollup = null;
+        }
+
+        this._fog = null;
+        this._sunTarget = null;
+        this._sunLight = null;
+        this._fillLight = null;
+        this._hemiLight = null;
+        this._lightGroup = null;
+        this._atmosphereHost = null;
+    }
 }
 
 export class TerrainScene {
@@ -641,7 +680,6 @@ export class TerrainScene {
     _scene      = null;
     _camera     = null;
     _controls   = null;
-    _lights     = [];
 
     constructor(params) {
     // set up scene and camera
@@ -662,7 +700,6 @@ export class TerrainScene {
             scene : this._scene,
             gui : params.gui,
             guiParams : params.guiParams,
-            lights: this._lights,
             atmosphereHost : {
                 setFog: (fogOrNull) => {
                     this._scene.fog = fogOrNull;
@@ -677,8 +714,6 @@ export class TerrainScene {
             guiParams : params.guiParams
         });
 
-        // Add all lights to scene
-        this._lights.forEach((light) => { this._scene.add(light); });
     }
 
     update(deltaTime) {
@@ -704,6 +739,15 @@ export class TerrainScene {
                 entity.dispose();
             }
         }
+
+        if (this._controls) {
+            this._controls.dispose();
+            this._controls = null;
+        }
+
+        this._entities = {};
+        this._scene = null;
+        this._camera = null;
     }
 
     // Event call back functions
