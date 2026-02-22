@@ -428,7 +428,7 @@ class TerrainAtmosphere {
             .name("intensity");
         sunRollup.add(params.guiParams.sun, "inclination", 0.0, 180.0)
             .onChange(() => { this.onSunSkyChange(); })
-            .name("inclination (degrees)");;
+            .name("inclination (degrees)");
         sunRollup.add(params.guiParams.sun, "azimuth", 0.0, 360.0)
             .onChange(() => { this.onSunSkyChange(); })
             .name("azimuth (degrees)");
