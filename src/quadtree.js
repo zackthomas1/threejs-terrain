@@ -35,6 +35,11 @@ export class QuadTree {
     }
 
     insert(position) {
+        const py = Number.isFinite(position.z) ? position.z : position.y;
+        if (!Number.isFinite(position.x) || !Number.isFinite(py)) {
+            throw new Error('QuadTree.insert: invalid position parameter');
+        }
+
         const insertRecursive = (child, position) => {
             const distanceToChild = (child, position) => {
                 return child.center.distanceTo(position);
@@ -85,6 +90,6 @@ export class QuadTree {
             }
         }
 
-        insertRecursive(this._root, new THREE.Vector2(position.x, position.y));
+        insertRecursive(this._root, new THREE.Vector2(position.x, py));
     }
 }

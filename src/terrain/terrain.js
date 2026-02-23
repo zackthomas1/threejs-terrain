@@ -217,7 +217,7 @@ class TerrainChunkManager {
     _group      = null;
     _chunks     = {};
     _chunkSize  = 128;
-    _chunkSegments = 256;
+    _chunkSegments = 64;
     _noiseGenerator = null;
     _terrainParams = {};
     _noiseParams = {};
@@ -290,22 +290,22 @@ class TerrainChunkManager {
         //         this._addChunk(x, y);
         //     }
         // }
-        this._addChunk(0, 0);
+        // this._addChunk(0, 0);
     }
 
-    _generateHeightMapTexture(x,y) {
+    _generateHeightMapTexture(centerX, centerY, chunkSize = this._chunkSize) {
         // PlaneGeometry with N segments has (N+1) vertices per axis.
         // Add a 1-texel border on each side so edge normals can sample central differences across chunk seams.
         const resolution = this._chunkSegments + 3;
-        const sampleStep = this._chunkSize / this._chunkSegments;
+        const sampleStep = chunkSize / this._chunkSegments;
         const data = new Float32Array(resolution * resolution);
         
         // DataTexture data is row-major: data[row * width + col] = data[y * width + x]
         for (let row = 0; row < resolution; row++) {
             // Row 0 starts one sample outside the chunk, then covers all vertex samples, then one sample outside.
-            const worldY = (y * this._chunkSize) - (this._chunkSize / 2) - sampleStep + (row * sampleStep);
+            const worldY = centerY - (chunkSize / 2) - sampleStep + (row * sampleStep);
             for (let col = 0; col < resolution; col++) {
-                const worldX = (x * this._chunkSize) - (this._chunkSize / 2) - sampleStep + (col * sampleStep);
+                const worldX = centerX - (chunkSize / 2) - sampleStep + (col * sampleStep);
                 data[(row * resolution) + col] = this._noiseGenerator.get2D(worldX, worldY);
             }
         }
@@ -326,6 +326,13 @@ class TerrainChunkManager {
         return x + "." + y;
     }
 
+    _quadTreeKey(centerX, centerY, size) {
+        // Round to integer grid to normalize key precision and prevent floating-point drift
+        const x = Math.round(centerX);
+        const y = Math.round(centerY);
+        return x + "." + y + "[" + size + "]";
+    }
+
     _keyCoord(keyStr) {
         const parts = keyStr.split(".");
         return {
@@ -335,11 +342,13 @@ class TerrainChunkManager {
     }
 
     _addChunk(x, y) {
-        const texture = this._generateHeightMapTexture(x,y);
+        const centerX = x * this._chunkSize;
+        const centerY = y * this._chunkSize;
+        const texture = this._generateHeightMapTexture(centerX, centerY, this._chunkSize);
 
         // create chunk
         const terrainChunk = new TerrainChunk({
-            position: new THREE.Vector2(x * this._chunkSize, y * this._chunkSize),
+            position: new THREE.Vector2(centerX, centerY),
             group: this._group,
             scale: 1,
             chunkSize: this._chunkSize,
@@ -349,6 +358,8 @@ class TerrainChunkManager {
 
         this._chunks[this._key(x,y)] = {
             position: [x,y],
+            center: [centerX, centerY],
+            size: this._chunkSize,
             chunk: terrainChunk,
         };
     }
@@ -369,7 +380,7 @@ class TerrainChunkManager {
 
     update(_deltaTime) {
         const updateQuadTree = () => {
-            const QUADTREE_SIZE = 32000;
+            const QUADTREE_SIZE = 256;
             const quadTree = new QuadTree({
                 min: new THREE.Vector2(-QUADTREE_SIZE, -QUADTREE_SIZE),
                 max: new THREE.Vector2(QUADTREE_SIZE, QUADTREE_SIZE),
@@ -385,29 +396,54 @@ class TerrainChunkManager {
             for (const c of children) {
                 c.bounds.getCenter(center);
                 c.bounds.getSize(dimensions);
-                const position = this._cellIndex(center);
+                const chunkCenterX = center.x;
+                const chunkCenterY = -center.y;
+                const chunkWidth = dimensions.x;
             
                 const child = { 
-                    position,
+                    center: [chunkCenterX, chunkCenterY],
                     bounds: c.bounds,
                     dimensions: [dimensions.x, dimensions.y],
                 };
 
-                const k = this._key(position[0], position[1]);
-                newTerrainChunks[k]= child;
+                const k = this._quadTreeKey(chunkCenterX, chunkCenterY, chunkWidth);
+                newTerrainChunks[k] = child;
             }
 
             const intersection = UTIL.DictIntersection(this._chunks, newTerrainChunks);
             const difference = UTIL.DictDifference(newTerrainChunks, this._chunks);
-            // const recycle = Object.values(UTIL.DictDifference(this._chunks, newTerrainChunks)); 
+            const recycle = UTIL.DictDifference(this._chunks, newTerrainChunks);
 
             newTerrainChunks = intersection;
 
-            for (const k in difference) {
-                const [xp, yp] = difference[k].position;
-                // const offset = new THREE.Vector2(xp, yp);
-                this._addChunk(xp,yp);
+            for (const k in recycle) {
+                recycle[k].chunk.dispose();
+                delete this._chunks[k];
             }
+
+            for (const k in difference) {
+                // console.log(Object.keys(newTerrainChunks).length);
+                const [chunkCenterX, chunkCenterY] = difference[k].center;
+                const chunkWidth = difference[k].dimensions[0];
+                const texture = this._generateHeightMapTexture(chunkCenterX, chunkCenterY, chunkWidth);
+
+                const terrainChunk = new TerrainChunk({
+                    position: new THREE.Vector2(chunkCenterX, chunkCenterY),
+                    group: this._group,
+                    scale: 1,
+                    chunkSize: chunkWidth,
+                    chunkSegments: this._chunkSegments,
+                    heightMapTexture: texture,
+                });
+
+                newTerrainChunks[k] = {
+                    center: [chunkCenterX, chunkCenterY],
+                    size: chunkWidth,
+                    chunk: terrainChunk,
+                };
+            }
+
+            this._chunks = newTerrainChunks;
         };
 
         const updateFixedGrid = () => {
@@ -425,17 +461,19 @@ class TerrainChunkManager {
             }
 
             const difference = UTIL.DictDifference(keys, this._chunks);
-            // const recycle = Object.values(UTIL.DictDifference(this._chunks, keys));
+            const recycle = UTIL.DictDifference(this._chunks, keys);
+            for (const k in recycle) {
+                recycle[k].chunk.dispose();
+                delete this._chunks[k];
+            }
 
             for (const k in difference) {
                 if (k in this._chunks) {
                     continue;
                 }
-            
                 const [xp, yp] = difference[k].position;
                 // const offset = new THREE.Vector2(xp * this._chunkSize, yp * this._chunkSize);
                 this._addChunk(xp,yp);
-
             }
         };
 
@@ -448,7 +486,7 @@ class TerrainChunkManager {
             this._addChunk(xc, yc);
         };
 
-        updateQuadTree();
+        updatedSingle();
     }
 
     dispose() {
@@ -496,9 +534,11 @@ class TerrainChunkManager {
     onNoiseChange() {
         this._noiseGenerator.setParams(this._noiseParams);
         for (const k in this._chunks) {
-            const coords = this._keyCoord(k);
-            const texture = this._generateHeightMapTexture(coords.x, coords.y);
-            const chunk = this._chunks[k].chunk;
+            const chunkData = this._chunks[k];
+            const chunk = chunkData.chunk;
+            const center = chunkData.center || [chunkData.position[0] * this._chunkSize, chunkData.position[1] * this._chunkSize];
+            const size = chunkData.size || this._chunkSize;
+            const texture = this._generateHeightMapTexture(center[0], center[1], size);
             chunk.setTexture(texture);
         }
     }
