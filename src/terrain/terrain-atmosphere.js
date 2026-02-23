@@ -42,7 +42,7 @@ export class TerrainAtmosphere {
 
         params.guiParams.sun = { 
             intensity: 7.0,
-            inclination: 35.0,
+            inclination: 88.0,
             azimuth: 96.0,
         };
 

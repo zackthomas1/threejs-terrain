@@ -3,6 +3,7 @@ import * as TSL from 'three/tsl';
 import { NoiseGenerator } from '../noise';
 import { TerrainAtmosphere } from './terrain-atmosphere';
 import { OrbitController, FPSController } from '../controller';
+import * as UTIL from '../util';
 
 class HeightMap {
     _heightmapNode      = null;
@@ -346,7 +347,10 @@ class TerrainChunkManager {
             heightMapTexture: texture,
         });
 
-        this._chunks[this._key(x,y)] = terrainChunk;
+        this._chunks[this._key(x,y)] = {
+            position: [x,y],
+            chunk: terrainChunk,
+        };
     }
 
     _cellIndex(pos) {
@@ -358,18 +362,50 @@ class TerrainChunkManager {
     }
 
     update(_deltaTime) {
-        // No per-frame updates yet; keep for interface parity with other entities.
-        const [xc, yc] = this._cellIndex(this._FPSPosition());
-        const key = this._key(xc, yc);
-        if (key in this._chunks) { return; }
+        const updateFixedGrid = () => {
+            const FIXED_GRID_SIZE = 2;
+            const [xc, yc] = this._cellIndex(this._FPSPosition());
+            
+            const keys = {};
+            for (let x = -FIXED_GRID_SIZE; x <= FIXED_GRID_SIZE; x++) {
+                for (let y= -FIXED_GRID_SIZE; y <= FIXED_GRID_SIZE; y++) {
+                    const key = this._key(x + xc, y + yc);
+                    keys[key] = { 
+                        position : [x + xc, y + yc]
+                    };
+                }
+            }
 
-        console.log("ADD CHUNK" + xc + yc);
-        this._addChunk(xc, yc);
+            const difference = UTIL.DictDifference(keys, this._chunks);
+            // const recycle = Object.values(UTIL.DictDifference(this._chunks, keys));
+
+            for (const k in difference) {
+                if (k in this._chunks) {
+                    continue;
+                }
+            
+                const [xp, yp] = difference[k].position;
+                // const offset = new THREE.Vector2(xp * this._chunkSize, yp * this._chunkSize);
+                this._addChunk(xp,yp);
+
+            }
+        };
+
+        const updatedSingle = () => {
+            const [xc, yc] = this._cellIndex(this._FPSPosition());
+            const key = this._key(xc, yc);
+            if (key in this._chunks) { return; }
+
+            console.log("ADD CHUNK" + xc + yc);
+            this._addChunk(xc, yc);
+        };
+
+        updateFixedGrid();
     }
 
     dispose() {
         for (const k in this._chunks) {
-            const chunk = this._chunks[k];
+            const chunk = this._chunks[k].chunk;
             chunk.dispose();
         }
 
@@ -387,7 +423,7 @@ class TerrainChunkManager {
     onWireframe() {
         console.log("Toggle wireframe");
         for (const k in this._chunks) {
-            const chunk = this._chunks[k];
+            const chunk = this._chunks[k].chunk;
             chunk._material.wireframe = this._terrainParams.wireframe;
         }
     }
@@ -396,7 +432,7 @@ class TerrainChunkManager {
         console.log("Toggle Normals");
         
         for (const k in this._chunks) {
-            const chunk = this._chunks[k];
+            const chunk = this._chunks[k].chunk;
             
             // Check if we are currently showing normals
             if (!this._terrainParams.normals) {
@@ -418,7 +454,7 @@ class TerrainChunkManager {
         for (const k in this._chunks) {
             const coords = this._keyCoord(k);
             const texture = this._generateHeightMapTexture(coords.x, coords.y);
-            const chunk = this._chunks[k];
+            const chunk = this._chunks[k].chunk;
             chunk.setTexture(texture);
         }
     }
