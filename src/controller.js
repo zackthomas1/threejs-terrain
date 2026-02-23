@@ -12,7 +12,7 @@ export class FPSController {
 
     constructor(params) {
         this._camera    = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        this._position  = new THREE.Vector3(2, 5, 2);
+        this._position  = new THREE.Vector3(5, 10, 5);
         this._camera.position.copy(this._position);
         
         // set up fly controls

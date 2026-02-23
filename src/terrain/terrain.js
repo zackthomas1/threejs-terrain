@@ -126,7 +126,7 @@ class TerrainChunk {
             color: '#444444',
             wireframe: false,
             flatShading: false,
-            side: THREE.SingleSide
+            side: THREE.FrontSide
         });
         this._materialNodes["diffuseColor"] = TSL.color( this._material.color); // Store original color
 
@@ -219,8 +219,10 @@ class TerrainChunkManager {
     _noiseGenerator = null;
     _terrainParams = {};
     _noiseParams = {};
+    _FPSPosition = null
 
     constructor(params) {
+        this._FPSPosition = params.terrainHost.getFPSControllerPosition;
         this._initializeNoise(params);
         this._initializeTerrain(params);
     }
@@ -235,7 +237,7 @@ class TerrainChunkManager {
             persistence: 0.5,
             lacunarity: 2.0,
             exponentiation: 3.9,
-            height: 32.0,
+            height: 16.0,
             seed: 1
         }
         this._noiseParams = params.guiParams.noise;
@@ -253,7 +255,7 @@ class TerrainChunkManager {
             () => { this.onNoiseChange(); });
         noiseRollup.add(params.guiParams.noise, "exponentiation", 0.1, 10.0).onFinishChange(
             () => { this.onNoiseChange(); });
-        noiseRollup.add(params.guiParams.noise, "height", 0, 128).onFinishChange(
+        noiseRollup.add(params.guiParams.noise, "height", 0, 64).onFinishChange(
             () => { this.onNoiseChange(); });
 
         this._noiseGenerator = new NoiseGenerator(this._noiseParams);
@@ -347,6 +349,40 @@ class TerrainChunkManager {
         this._chunks[this._key(x,y)] = terrainChunk;
     }
 
+    _cellIndex(pos) {
+        const xp = pos.x + this._chunkSize * 0.5;
+        const yp = pos.z + this._chunkSize * 0.5;
+        const x = Math.floor(xp / this._chunkSize);
+        const y = -Math.floor(yp / this._chunkSize);
+        return[x,y];
+    }
+
+    update(_deltaTime) {
+        // No per-frame updates yet; keep for interface parity with other entities.
+        const [xc, yc] = this._cellIndex(this._FPSPosition());
+        const key = this._key(xc, yc);
+        if (key in this._chunks) { return; }
+
+        console.log("ADD CHUNK" + xc + yc);
+        this._addChunk(xc, yc);
+    }
+
+    dispose() {
+        for (const k in this._chunks) {
+            const chunk = this._chunks[k];
+            chunk.dispose();
+        }
+
+        this._chunks = {};
+
+        if (this._group?.parent) {
+            this._group.parent.remove(this._group);
+        }
+
+        this._group = null;
+        this._noiseGenerator = null;
+    }
+
     // Event handlers
     onWireframe() {
         console.log("Toggle wireframe");
@@ -386,27 +422,6 @@ class TerrainChunkManager {
             chunk.setTexture(texture);
         }
     }
-
-    update(_deltaTime) {
-        // No per-frame updates yet; keep for interface parity with other entities.
-        return;
-    }
-
-    dispose() {
-        for (const k in this._chunks) {
-            const chunk = this._chunks[k];
-            chunk.dispose();
-        }
-
-        this._chunks = {};
-
-        if (this._group?.parent) {
-            this._group.parent.remove(this._group);
-        }
-
-        this._group = null;
-        this._noiseGenerator = null;
-    }
 }
 
 export class TerrainScene {
@@ -420,7 +435,7 @@ export class TerrainScene {
 
         // Set up scene GUI
         params.guiParams.scene = {
-            activeController : "FPS",
+            activeController : "Orbit",
         }
         this._sceneParams = params.guiParams.scene;
 
@@ -444,7 +459,12 @@ export class TerrainScene {
         this._entities['terrain'] = new TerrainChunkManager({
             scene : this._scene,
             gui : params.gui,
-            guiParams : params.guiParams
+            guiParams : params.guiParams,
+            terrainHost : {
+                getFPSControllerPosition: () => {
+                    return this._entities['fps-controller'].getPosition();
+                }
+            }
         });
 
         this._entities['orbit-controller'] = new OrbitController({
