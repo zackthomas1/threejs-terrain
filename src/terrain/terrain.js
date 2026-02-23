@@ -4,6 +4,7 @@ import { NoiseGenerator } from '../noise';
 import { TerrainAtmosphere } from './terrain-atmosphere';
 import { OrbitController, FPSController } from '../controller';
 import * as UTIL from '../util';
+import { QuadTree } from '../quadtree';
 
 class HeightMap {
     _heightmapNode      = null;
@@ -229,7 +230,6 @@ class TerrainChunkManager {
     }
 
     _initializeNoise(params) {
-
         // setup noise GUI fields
         params.guiParams.noise = {
             noiseType: 'simplex',
@@ -354,14 +354,62 @@ class TerrainChunkManager {
     }
 
     _cellIndex(pos) {
-        const xp = pos.x + this._chunkSize * 0.5;
-        const yp = pos.z + this._chunkSize * 0.5;
+        const px = pos.x;
+        const py = Number.isFinite(pos.z) ? pos.z : pos.y;
+        if (!Number.isFinite(px) || !Number.isFinite(py)) {
+            throw new Error('TerrainChunkManager._cellIndex: invalid position parameter');
+        }
+
+        const xp = px + this._chunkSize * 0.5;
+        const yp = py + this._chunkSize * 0.5;
         const x = Math.floor(xp / this._chunkSize);
         const y = -Math.floor(yp / this._chunkSize);
         return[x,y];
     }
 
     update(_deltaTime) {
+        const updateQuadTree = () => {
+            const QUADTREE_SIZE = 32000;
+            const quadTree = new QuadTree({
+                min: new THREE.Vector2(-QUADTREE_SIZE, -QUADTREE_SIZE),
+                max: new THREE.Vector2(QUADTREE_SIZE, QUADTREE_SIZE),
+                nodeSize: this._chunkSize,
+            });
+            quadTree.insert(this._FPSPosition());
+
+            const children = quadTree.getChildren();
+
+            let newTerrainChunks = {};
+            const center = new THREE.Vector2();
+            const dimensions = new THREE.Vector2();
+            for (const c of children) {
+                c.bounds.getCenter(center);
+                c.bounds.getSize(dimensions);
+                const position = this._cellIndex(center);
+            
+                const child = { 
+                    position,
+                    bounds: c.bounds,
+                    dimensions: [dimensions.x, dimensions.y],
+                };
+
+                const k = this._key(position[0], position[1]);
+                newTerrainChunks[k]= child;
+            }
+
+            const intersection = UTIL.DictIntersection(this._chunks, newTerrainChunks);
+            const difference = UTIL.DictDifference(newTerrainChunks, this._chunks);
+            // const recycle = Object.values(UTIL.DictDifference(this._chunks, newTerrainChunks)); 
+
+            newTerrainChunks = intersection;
+
+            for (const k in difference) {
+                const [xp, yp] = difference[k].position;
+                // const offset = new THREE.Vector2(xp, yp);
+                this._addChunk(xp,yp);
+            }
+        };
+
         const updateFixedGrid = () => {
             const FIXED_GRID_SIZE = 2;
             const [xc, yc] = this._cellIndex(this._FPSPosition());
@@ -400,7 +448,7 @@ class TerrainChunkManager {
             this._addChunk(xc, yc);
         };
 
-        updateFixedGrid();
+        updateQuadTree();
     }
 
     dispose() {
@@ -421,7 +469,6 @@ class TerrainChunkManager {
 
     // Event handlers
     onWireframe() {
-        console.log("Toggle wireframe");
         for (const k in this._chunks) {
             const chunk = this._chunks[k].chunk;
             chunk._material.wireframe = this._terrainParams.wireframe;
@@ -429,8 +476,6 @@ class TerrainChunkManager {
     }
 
     onNormals() {
-        console.log("Toggle Normals");
-        
         for (const k in this._chunks) {
             const chunk = this._chunks[k].chunk;
             
@@ -449,7 +494,6 @@ class TerrainChunkManager {
     }
 
     onNoiseChange() {
-        console.log("TerrainChunkManager.onNoiseChange")
         this._noiseGenerator.setParams(this._noiseParams);
         for (const k in this._chunks) {
             const coords = this._keyCoord(k);

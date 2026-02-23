@@ -38,7 +38,7 @@ Integrate physically-based atmospheric and water effects
 ## Phase 5. Atmosphere and Water surface
 Integrate physically-based atmospheric and water effects
 
-- [ ] **Atmospheric Scattering**: Implement a TSL-based sky shader using Rayleigh (for blue sky) and Mie (for hazy horizons) scattering models.
+- [x] **Atmospheric Scattering**: Implement a TSL-based sky shader using Rayleigh (for blue sky) and Mie (for hazy horizons) scattering models.
 
 - [ ] **Fresnel Water Surface**:Create a dynamic water plane using scrolling normal maps. Implement Fresnel reflections, making the water more reflective at grazing angles and more transparent when looking straight down
 
