@@ -2,12 +2,12 @@ import * as THREE from 'three/webgpu';
 import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
 
 const SKYBOXSCALE = 4096;
-const SUNLIGHTCOLOR = '#FFFFFF'
-const HEMISPHERE_LIGHT_SKY_COLOR = '#bbf7ff';
-const HEMISPHERE_LIGHT_GROUND_COLOR = '#33335f';
-const SUNLIGHT_INTENSITY = 2.0;
-const HEMISPHERE_LIGHT_INTENSITY = 0.6;
+const SUNLIGHTCOLOR = '#f1eee3'
 const SUNLIGHT_DISTANCE = 256;
+const SUNLIGHT_INTENSITY = 2.0;
+const HEMISPHERE_LIGHT_SKY_COLOR = '#d2e9eb';
+const HEMISPHERE_LIGHT_GROUND_COLOR = '#5d5d74';
+const INTENSITY_RATIO = 0.8;
 
 export class TerrainAtmosphere {
     _sky = null;
@@ -19,12 +19,8 @@ export class TerrainAtmosphere {
     _sunParams  = {};
     _fogParams  = {};
     _sunLight   = null;
-    _fillLight  = null;
-    _hemiLight  = null;
     _sunTarget  = null;
     _sunLightHelper = null;
-    _fillLightHelper = null;
-    _hemiLightHelper = null;
 
     constructor(params) {
         // guard check params are valid
@@ -73,7 +69,7 @@ export class TerrainAtmosphere {
             .onChange(() => { this.onSunSkyChange(); });
 
         // sun
-        sunRollup.add(params.guiParams.sun, "intensity", 1.0, 10.0)
+        sunRollup.add(params.guiParams.sun, "intensity", 1.0, 15.0)
             .onChange(() => { this.onSunSkyChange(); })
             .name("intensity");
         sunRollup.add(params.guiParams.sun, "inclination", 0.0, 180.0)
@@ -107,8 +103,7 @@ export class TerrainAtmosphere {
         this._atmosphereHost = params.atmosphereHost;
 
         // create lights
-        const lightGroup = new THREE.Group();
-        this._lightGroup = lightGroup;
+        this._lightGroup = new THREE.Group();
 
         // Sun light
         this._sunTarget = new THREE.Object3D();
@@ -117,24 +112,27 @@ export class TerrainAtmosphere {
         this._sunLight = new THREE.DirectionalLight(SUNLIGHTCOLOR, SUNLIGHT_INTENSITY);
         this._sunLight.target = this._sunTarget;
         this._sunLight.position.set(-1, 2, 4);
-        lightGroup.add(this._sunTarget);
-        lightGroup.add(this._sunLight);
+
+        this._lightGroup.add(this._sunTarget);
+        this._lightGroup.add(this._sunLight);
+        this._lightGroup.add(new THREE.DirectionalLightHelper(this._sunLight, 20));
 
         // hemisphere light
-        const hemiLight = new THREE.HemisphereLight(HEMISPHERE_LIGHT_SKY_COLOR, HEMISPHERE_LIGHT_GROUND_COLOR, HEMISPHERE_LIGHT_INTENSITY);
-        this._hemiLight = hemiLight;
-        lightGroup.add(hemiLight);
+        const hemiLight = new THREE.HemisphereLight(HEMISPHERE_LIGHT_SKY_COLOR, 
+            HEMISPHERE_LIGHT_GROUND_COLOR, 
+            SUNLIGHT_INTENSITY * INTENSITY_RATIO
+        );
+        this._lightGroup.add(hemiLight);
+        this._lightGroup.add(new THREE.HemisphereLightHelper(hemiLight, 256));
 
-        // Add light helpers for visualization
-        const sunLightHelper = new THREE.DirectionalLightHelper(this._sunLight, 20);
-        this._sunLightHelper = sunLightHelper;
-        lightGroup.add(sunLightHelper);
-        
-        const hemiLightHelper = new THREE.HemisphereLightHelper(hemiLight, 256);
-        this._hemiLightHelper = hemiLightHelper;
-        lightGroup.add(hemiLightHelper);
+        // overhead light
+        const overHeadLight= new THREE.DirectionalLight(SUNLIGHTCOLOR, SUNLIGHT_INTENSITY * INTENSITY_RATIO);
+        overHeadLight.target = this._sunTarget;
+        overHeadLight.position.set(0, 40, 0);
+        this._lightGroup.add(overHeadLight);
+        this._lightGroup.add(new THREE.DirectionalLightHelper(overHeadLight, 20));
 
-        params.scene.add(lightGroup);
+        params.scene.add(this._lightGroup);
 
         // Initialize atmosphere 
         this.onSunSkyChange();
@@ -186,20 +184,20 @@ export class TerrainAtmosphere {
                 console.error("Missing required sunLight");
                 return;
             }
-
             // Position sun light
             this._sunLight.position.copy(
                 position.clone().multiplyScalar(SUNLIGHT_DISTANCE)
             );
 
-
-            this._sunTarget.position.set(0, 0, 0);
-            this._sunTarget.updateMatrixWorld();
         })(sunPosition);
 
-        if (this._sunLight) {
-            this._sunLight.intensity = this._sunParams.intensity;
-        }
+
+        this._lightGroup.children.forEach((light) => {
+            if (light.isLight) {
+                light.intensity = this._sunParams.intensity * INTENSITY_RATIO;
+            }
+        });
+        this._sunLight.intensity = this._sunParams.intensity;
     }
 
     onFogChange() {
@@ -243,7 +241,6 @@ export class TerrainAtmosphere {
 
         this._sunTarget?.parent?.remove(this._sunTarget);
         this._sunLight?.parent?.remove(this._sunLight);
-        this._fillLight?.parent?.remove(this._fillLight);
         this._hemiLight?.parent?.remove(this._hemiLight);
         this._lightGroup?.parent?.remove(this._lightGroup);
 
@@ -255,7 +252,6 @@ export class TerrainAtmosphere {
         this._fog = null;
         this._sunTarget = null;
         this._sunLight = null;
-        this._fillLight = null;
         this._hemiLight = null;
         this._lightGroup = null;
         this._atmosphereHost = null;

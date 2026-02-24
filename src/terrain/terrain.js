@@ -234,8 +234,8 @@ class TerrainChunk {
 class TerrainChunkManager {
     _group      = null;
     _chunks     = {};
-    _chunkSize  = 128;
-    _chunkSegments = 256;
+    _chunkSize  = 64;
+    _chunkSegments = 128;
     _noiseGenerator = null;
     _terrainParams = {};
     _noiseParams = {};
@@ -363,7 +363,7 @@ class TerrainChunkManager {
 
     update(_deltaTime) {
         const updateQuadTree = () => {
-            const QUADTREE_SIZE = 4096;
+            const QUADTREE_SIZE = 2048;
             const keyFn = (centerX, centerY, size) => {
                 // Round to integer grid to normalize key precision and prevent floating-point drift
                 const x = Math.round(centerX);
