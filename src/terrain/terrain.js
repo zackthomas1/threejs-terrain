@@ -283,19 +283,11 @@ class TerrainChunkManager {
         this._group = new THREE.Group();
         this._group.rotation.x = -Math.PI / 2;
         params.scene.add(this._group);
-
-        // create chunks
-        // for (let x = -1; x <= 1; x++) {
-        //     for (let y = -1; y <= 1; y++) {
-        //         this._addChunk(x, y);
-        //     }
-        // }
-        // this._addChunk(0, 0);
     }
 
     _generateHeightMapTexture(centerX, centerY, chunkSize = this._chunkSize) {
         // PlaneGeometry with N segments has (N+1) vertices per axis.
-        // Add a 1-texel border on each side so edge normals can sample central differences across chunk seams.
+        // Add a 1-texel border on each side so edge normals can sample across chunk seams.
         const resolution = this._chunkSegments + 3;
         const sampleStep = chunkSize / this._chunkSegments;
         const data = new Float32Array(resolution * resolution);
@@ -322,51 +314,22 @@ class TerrainChunkManager {
         return texture;
     }
 
-    _key (x, y) {
-        return x + "." + y;
-    }
-
-    _quadTreeKey(centerX, centerY, size) {
-        // Round to integer grid to normalize key precision and prevent floating-point drift
-        const x = Math.round(centerX);
-        const y = Math.round(centerY);
-        return x + "." + y + "[" + size + "]";
-    }
-
-    _keyCoord(keyStr) {
-        const parts = keyStr.split(".");
-        return {
-            x: parseInt(parts[0], 10),
-            y: parseInt(parts[1], 10)
-        };
-    }
-
-    _addChunk(x, y) {
-        const centerX = x * this._chunkSize;
-        const centerY = y * this._chunkSize;
-        const texture = this._generateHeightMapTexture(centerX, centerY, this._chunkSize);
+    _createChunk(offset, size) {
+        const centerX = offset.x;
+        const centerY = offset.y;
+        const texture = this._generateHeightMapTexture(offset.x, offset.y, size);
 
         // create chunk
-        const terrainChunk = new TerrainChunk({
+        return new TerrainChunk({
             position: new THREE.Vector2(centerX, centerY),
             group: this._group,
-            scale: 1,
-            chunkSize: this._chunkSize,
+            chunkSize: size,
             chunkSegments: this._chunkSegments,
             heightMapTexture: texture,
         });
-
-        this._chunks[this._key(x,y)] = {
-            position: [x,y],
-            center: [centerX, centerY],
-            size: this._chunkSize,
-            chunk: terrainChunk,
-        };
     }
 
-    _cellIndex(pos) {
-        const px = pos.x;
-        const py = Number.isFinite(pos.z) ? pos.z : pos.y;
+    _cellIndex(px, py) {
         if (!Number.isFinite(px) || !Number.isFinite(py)) {
             throw new Error('TerrainChunkManager._cellIndex: invalid position parameter');
         }
@@ -380,6 +343,13 @@ class TerrainChunkManager {
 
     update(_deltaTime) {
         const updateQuadTree = () => {
+            const keyFn = (centerX, centerY, size) => {
+                // Round to integer grid to normalize key precision and prevent floating-point drift
+                const x = Math.round(centerX);
+                const y = Math.round(centerY);
+                return x + "." + y + "[" + size + "]";
+            }
+
             const QUADTREE_SIZE = 256;
             const quadTree = new QuadTree({
                 min: new THREE.Vector2(-QUADTREE_SIZE, -QUADTREE_SIZE),
@@ -400,26 +370,25 @@ class TerrainChunkManager {
                 const chunkCenterY = -center.y;
                 const chunkWidth = dimensions.x;
             
-                const child = { 
+
+                const k = keyFn(chunkCenterX, chunkCenterY, chunkWidth);
+                newTerrainChunks[k] = { 
                     center: [chunkCenterX, chunkCenterY],
                     bounds: c.bounds,
                     dimensions: [dimensions.x, dimensions.y],
                 };
-
-                const k = this._quadTreeKey(chunkCenterX, chunkCenterY, chunkWidth);
-                newTerrainChunks[k] = child;
             }
 
             const intersection = UTIL.DictIntersection(this._chunks, newTerrainChunks);
             const difference = UTIL.DictDifference(newTerrainChunks, this._chunks);
-            const recycle = UTIL.DictDifference(this._chunks, newTerrainChunks);
 
             newTerrainChunks = intersection;
 
-            for (const k in recycle) {
-                recycle[k].chunk.dispose();
-                delete this._chunks[k];
-            }
+            // const recycle = UTIL.DictDifference(this._chunks, newTerrainChunks);
+            // for (const k in recycle) {
+            //     recycle[k].chunk.dispose();
+            //     delete this._chunks[k];
+            // }
 
             for (const k in difference) {
                 // console.log(Object.keys(newTerrainChunks).length);
@@ -447,46 +416,81 @@ class TerrainChunkManager {
         };
 
         const updateFixedGrid = () => {
-            const FIXED_GRID_SIZE = 2;
-            const [xc, yc] = this._cellIndex(this._FPSPosition());
+            const GRID_SIZE = 2;
+            const keyFn = (x, y) => {
+                return x + "." + y;
+            };
             
-            const keys = {};
-            for (let x = -FIXED_GRID_SIZE; x <= FIXED_GRID_SIZE; x++) {
-                for (let y= -FIXED_GRID_SIZE; y <= FIXED_GRID_SIZE; y++) {
-                    const key = this._key(x + xc, y + yc);
-                    keys[key] = { 
-                        position : [x + xc, y + yc]
+            const pos = this._FPSPosition();
+            const [xc, zc] = this._cellIndex(pos.x, pos.z);
+            
+            // create an object which contains all the cell indexes of chunks
+            // which surrond the player position in a fixed grid of size GRID_SIZE
+            const gridCellIndexes = {};
+            for (let x = -GRID_SIZE; x <= GRID_SIZE; x++) {
+                for (let z= -GRID_SIZE; z <= GRID_SIZE; z++) {
+                    const newChunkKey = keyFn(x + xc, z + zc);
+                    gridCellIndexes[newChunkKey] = { 
+                        cellIndex : [x + xc, z + zc]
                     };
                 }
             }
 
-            const difference = UTIL.DictDifference(keys, this._chunks);
-            const recycle = UTIL.DictDifference(this._chunks, keys);
+            // Create an object which contains the cell indexes of chunks
+            // which do not exist new updated fixed grid, but do currently exist.
+            const recycle = UTIL.DictDifference(this._chunks, gridCellIndexes);
             for (const k in recycle) {
+                // Dispose of these chunks.
                 recycle[k].chunk.dispose();
                 delete this._chunks[k];
             }
 
-            for (const k in difference) {
+            // Create an object which contains the cell indexes of chunks 
+            // that do not already exist and need to be created
+            const newChunkCells = UTIL.DictDifference(gridCellIndexes, this._chunks);
+            for (const k in newChunkCells) {
+                
+                // Guard Check - skip chunks cells that already exist
                 if (k in this._chunks) {
                     continue;
                 }
-                const [xp, yp] = difference[k].position;
-                // const offset = new THREE.Vector2(xp * this._chunkSize, yp * this._chunkSize);
-                this._addChunk(xp,yp);
+
+                // Create new chunk
+                const size = this._chunkSize;
+                const [xi, zi] = newChunkCells[k].cellIndex;
+                const offset = new THREE.Vector2(xi * this._chunkSize, zi * this._chunkSize);
+                this._chunks[keyFn(xi,zi)] = {
+                    cellIndex: [xi, zi],
+                    offset: offset,
+                    size: size,
+                    chunk: this._createChunk(offset, this._chunkSize),
+                };
+                console.log("Update Fixed Grid: (" + xc + "," + zc + ")");
             }
         };
 
-        const updatedSingle = () => {
-            const [xc, yc] = this._cellIndex(this._FPSPosition());
-            const key = this._key(xc, yc);
-            if (key in this._chunks) { return; }
+        const updateSingle = () => {
+            const keyFn = (x, y) => { return x + "." + y; };
+            
+            const pos = this._FPSPosition();
+            const [xc, zc] = this._cellIndex(pos.x, pos.z);
+            const newChunkKey = keyFn(xc, zc);
 
-            console.log("ADD CHUNK" + xc + yc);
-            this._addChunk(xc, yc);
+            // Skip, still in bounds of previous chunk of terrain
+            if (newChunkKey in this._chunks) { return; }
+
+            const size = this._chunkSize;
+            const offset = new THREE.Vector2(xc * size, zc * size);
+            this._chunks[newChunkKey] = {
+                cellIndex: [xc, zc],
+                offset: offset,
+                size: size,
+                chunk: this._createChunk(offset, size),
+            };
+            console.log("Update Single Chunk: (" + xc + "," + zc + ")");
         };
 
-        updatedSingle();
+        updateQuadTree();
     }
 
     dispose() {
@@ -534,11 +538,9 @@ class TerrainChunkManager {
     onNoiseChange() {
         this._noiseGenerator.setParams(this._noiseParams);
         for (const k in this._chunks) {
-            const chunkData = this._chunks[k];
-            const chunk = chunkData.chunk;
-            const center = chunkData.center || [chunkData.position[0] * this._chunkSize, chunkData.position[1] * this._chunkSize];
-            const size = chunkData.size || this._chunkSize;
-            const texture = this._generateHeightMapTexture(center[0], center[1], size);
+            const {cellIndex, offset, size, chunk} = this._chunks[k];
+
+            const texture = this._generateHeightMapTexture(offset.x, offset.y, size);
             chunk.setTexture(texture);
         }
     }
