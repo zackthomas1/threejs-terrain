@@ -131,7 +131,7 @@ class TerrainChunk {
             side: THREE.FrontSide
         });
         this._materialNodes["diffuseColor"] = TSL.color( this._material.color); // Store original color
-
+        
         this._heightMap = new HeightMap({
             chunkSize: params.chunkSize,
             chunkSegments: params.chunkSegments,
@@ -143,6 +143,10 @@ class TerrainChunk {
         // Debug Visualization
         // Create a node to visualize the normal as a color (0..1 range)
         this._materialNodes["normalColor"] = this._material.normalNode.mul(0.5).add(0.5);
+
+        // set wireframe and normal state
+        this._material.wireframe = params.isWireFrameEnabled;
+        this.displayNormals(params.isNormalsEnabled);
 
         // Create Mesh and set transform
         this._mesh = new THREE.Mesh(geometry, this._material);
@@ -188,6 +192,20 @@ class TerrainChunk {
         }
     }
 
+    displayNormals(isNormalsDisplayed) {
+        // Check if we are currently showing normals
+        if (!isNormalsDisplayed) {
+            // show diffuse
+            this._material.colorNode   = this._materialNodes["diffuseColor"];
+            this._material.lights      = true;
+        } else {
+            // Show normals
+            this._material.colorNode   = this._materialNodes["normalColor"];
+            this._material.lights      = false;
+        }
+        this._material.needsUpdate = true;
+    }
+
     dispose() {
         if (this._mesh?.parent) {
             this._mesh.parent.remove(this._mesh);
@@ -217,7 +235,7 @@ class TerrainChunkManager {
     _group      = null;
     _chunks     = {};
     _chunkSize  = 128;
-    _chunkSegments = 64;
+    _chunkSegments = 256;
     _noiseGenerator = null;
     _terrainParams = {};
     _noiseParams = {};
@@ -326,6 +344,8 @@ class TerrainChunkManager {
             chunkSize: size,
             chunkSegments: this._chunkSegments,
             heightMapTexture: texture,
+            isWireFrameEnabled: this._terrainParams.wireframe,
+            isNormalsEnabled: this._terrainParams.normals,
         });
     }
 
@@ -343,6 +363,7 @@ class TerrainChunkManager {
 
     update(_deltaTime) {
         const updateQuadTree = () => {
+            const QUADTREE_SIZE = 4096;
             const keyFn = (centerX, centerY, size) => {
                 // Round to integer grid to normalize key precision and prevent floating-point drift
                 const x = Math.round(centerX);
@@ -350,69 +371,50 @@ class TerrainChunkManager {
                 return x + "." + y + "[" + size + "]";
             }
 
-            const QUADTREE_SIZE = 256;
+            
             const quadTree = new QuadTree({
                 min: new THREE.Vector2(-QUADTREE_SIZE, -QUADTREE_SIZE),
                 max: new THREE.Vector2(QUADTREE_SIZE, QUADTREE_SIZE),
                 nodeSize: this._chunkSize,
             });
             quadTree.insert(this._FPSPosition());
-
             const children = quadTree.getChildren();
 
-            let newTerrainChunks = {};
+            const quadTreeChunks = {};
             const center = new THREE.Vector2();
             const dimensions = new THREE.Vector2();
             for (const c of children) {
                 c.bounds.getCenter(center);
                 c.bounds.getSize(dimensions);
-                const chunkCenterX = center.x;
-                const chunkCenterY = -center.y;
-                const chunkWidth = dimensions.x;
-            
-
-                const k = keyFn(chunkCenterX, chunkCenterY, chunkWidth);
-                newTerrainChunks[k] = { 
-                    center: [chunkCenterX, chunkCenterY],
+                const key = keyFn(center.x, center.y, dimensions.x);
+                quadTreeChunks[key] = {
+                    center: [center.x, -center.y],
                     bounds: c.bounds,
-                    dimensions: [dimensions.x, dimensions.y],
+                    size: dimensions.x,
                 };
             }
 
-            const intersection = UTIL.DictIntersection(this._chunks, newTerrainChunks);
-            const difference = UTIL.DictDifference(newTerrainChunks, this._chunks);
-
-            newTerrainChunks = intersection;
-
-            // const recycle = UTIL.DictDifference(this._chunks, newTerrainChunks);
-            // for (const k in recycle) {
-            //     recycle[k].chunk.dispose();
-            //     delete this._chunks[k];
-            // }
-
-            for (const k in difference) {
-                // console.log(Object.keys(newTerrainChunks).length);
-                const [chunkCenterX, chunkCenterY] = difference[k].center;
-                const chunkWidth = difference[k].dimensions[0];
-                const texture = this._generateHeightMapTexture(chunkCenterX, chunkCenterY, chunkWidth);
-
-                const terrainChunk = new TerrainChunk({
-                    position: new THREE.Vector2(chunkCenterX, chunkCenterY),
-                    group: this._group,
-                    scale: 1,
-                    chunkSize: chunkWidth,
-                    chunkSegments: this._chunkSegments,
-                    heightMapTexture: texture,
-                });
-
-                newTerrainChunks[k] = {
-                    center: [chunkCenterX, chunkCenterY],
-                    size: chunkWidth,
-                    chunk: terrainChunk,
+            const newChunks = UTIL.DictDifference(quadTreeChunks, this._chunks);
+            if (Object.keys(newChunks).length === 0) { return; }
+            for (const key in newChunks) {
+                const [xp, zp] = newChunks[key].center;
+                const size = newChunks[key].size;
+                const offset = new THREE.Vector2(xp, zp);
+                this._chunks[key] = {
+                    cellIndex: [xp, zp],
+                    offset: offset,
+                    size: size,
+                    chunk: this._createChunk(offset, size),
                 };
             }
 
-            this._chunks = newTerrainChunks;
+            const recycleChunks = UTIL.DictDifference(this._chunks, quadTreeChunks);
+            for (const k in recycleChunks) {
+                recycleChunks[k].chunk.dispose();
+                delete this._chunks[k];
+            }
+
+            console.log("Chunks updated: ", Object.keys(newChunks).length, "Chunks removed: ", Object.keys(recycleChunks).length)
         };
 
         const updateFixedGrid = () => {
@@ -438,10 +440,10 @@ class TerrainChunkManager {
 
             // Create an object which contains the cell indexes of chunks
             // which do not exist new updated fixed grid, but do currently exist.
-            const recycle = UTIL.DictDifference(this._chunks, gridCellIndexes);
-            for (const k in recycle) {
+            const recycleChunks = UTIL.DictDifference(this._chunks, gridCellIndexes);
+            for (const k in recycleChunks) {
                 // Dispose of these chunks.
-                recycle[k].chunk.dispose();
+                recycleChunks[k].chunk.dispose();
                 delete this._chunks[k];
             }
 
@@ -520,18 +522,7 @@ class TerrainChunkManager {
     onNormals() {
         for (const k in this._chunks) {
             const chunk = this._chunks[k].chunk;
-            
-            // Check if we are currently showing normals
-            if (!this._terrainParams.normals) {
-                // show diffuse
-                chunk._material.colorNode   = chunk._materialNodes["diffuseColor"];
-                chunk._material.lights      = true;
-            } else {
-                // Show normals
-                chunk._material.colorNode   = chunk._materialNodes["normalColor"];
-                chunk._material.lights      = false;
-            }
-            chunk._material.needsUpdate = true;
+            chunk.displayNormals(this._terrainParams.normals);
         }
     }
 
@@ -557,7 +548,7 @@ export class TerrainScene {
 
         // Set up scene GUI
         params.guiParams.scene = {
-            activeController : "Orbit",
+            activeController : "FPS",
         }
         this._sceneParams = params.guiParams.scene;
 

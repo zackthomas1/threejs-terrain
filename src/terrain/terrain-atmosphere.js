@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu';
 import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
 
-const SKYBOXSCALE = 10000;
+const SKYBOXSCALE = 4096;
 const SUNLIGHTCOLOR = '#FFFFFF'
 const HEMISPHERE_LIGHT_SKY_COLOR = '#bbf7ff';
 const HEMISPHERE_LIGHT_GROUND_COLOR = '#33335f';
@@ -42,12 +42,12 @@ export class TerrainAtmosphere {
 
         params.guiParams.sun = { 
             intensity: 7.0,
-            inclination: 88.0,
+            inclination: 35.0,
             azimuth: 96.0,
         };
 
         params.guiParams.fog = {
-            enable: true,
+            enable: false,
             color: '#96afca',
             near: 64,
             far: 1024,
