@@ -394,7 +394,7 @@ class TerrainChunkManager {
                 };
             }
 
-            const newChunks = UTIL.DictDifference(quadTreeChunks, this._chunks);
+            const newChunks = UTIL.dictDifference(quadTreeChunks, this._chunks);
             if (Object.keys(newChunks).length === 0) { return; }
             for (const key in newChunks) {
                 const [xp, zp] = newChunks[key].center;
@@ -408,7 +408,7 @@ class TerrainChunkManager {
                 };
             }
 
-            const recycleChunks = UTIL.DictDifference(this._chunks, quadTreeChunks);
+            const recycleChunks = UTIL.dictDifference(this._chunks, quadTreeChunks);
             for (const k in recycleChunks) {
                 recycleChunks[k].chunk.dispose();
                 delete this._chunks[k];
@@ -440,7 +440,7 @@ class TerrainChunkManager {
 
             // Create an object which contains the cell indexes of chunks
             // which do not exist new updated fixed grid, but do currently exist.
-            const recycleChunks = UTIL.DictDifference(this._chunks, gridCellIndexes);
+            const recycleChunks = UTIL.dictDifference(this._chunks, gridCellIndexes);
             for (const k in recycleChunks) {
                 // Dispose of these chunks.
                 recycleChunks[k].chunk.dispose();
@@ -449,7 +449,7 @@ class TerrainChunkManager {
 
             // Create an object which contains the cell indexes of chunks 
             // that do not already exist and need to be created
-            const newChunkCells = UTIL.DictDifference(gridCellIndexes, this._chunks);
+            const newChunkCells = UTIL.dictDifference(gridCellIndexes, this._chunks);
             for (const k in newChunkCells) {
                 
                 // Guard Check - skip chunks cells that already exist

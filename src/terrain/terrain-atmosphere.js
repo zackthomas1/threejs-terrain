@@ -220,23 +220,15 @@ export class TerrainAtmosphere {
             this._sunLightHelper = null;
         }
 
-        if (this._fillLightHelper) {
-            this._fillLightHelper.parent?.remove(this._fillLightHelper);
-            this._fillLightHelper.dispose();
-            this._fillLightHelper = null;
-        }
-
-        if (this._hemiLightHelper) {
-            this._hemiLightHelper.parent?.remove(this._hemiLightHelper);
-            this._hemiLightHelper.dispose();
-            this._hemiLightHelper = null;
-        }
-
         if (this._sky) {
             this._sky.parent?.remove(this._sky);
             this._sky.geometry?.dispose?.();
             this._sky.material?.dispose?.();
             this._sky = null;
+        }
+
+        for (let light in this._lightGroup.children) {
+            light.dispose()
         }
 
         this._sunTarget?.parent?.remove(this._sunTarget);

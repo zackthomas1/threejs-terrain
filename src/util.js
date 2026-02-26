@@ -19,7 +19,7 @@ export function mulberry32(seed) {
     };
 }
 
-export function DictIntersection(dictA, dictB) {
+export function dictIntersection(dictA, dictB) {
     const intersection = {}; 
     for (const k in dictB) {
         if (k in dictA) {
@@ -29,7 +29,7 @@ export function DictIntersection(dictA, dictB) {
     return intersection;
 }
 
-export function DictDifference(dictA, dictB) {
+export function dictDifference(dictA, dictB) {
     const diff = {...dictA}; 
     for (const k in dictB) {
         delete diff[k];
