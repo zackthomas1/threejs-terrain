@@ -18,3 +18,21 @@ export function mulberry32(seed) {
         return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
     };
 }
+
+export function dictIntersection(dictA, dictB) {
+    const intersection = {}; 
+    for (const k in dictB) {
+        if (k in dictA) {
+            intersection[k] = dictA[k];
+        }
+    }
+    return intersection;
+}
+
+export function dictDifference(dictA, dictB) {
+    const diff = {...dictA}; 
+    for (const k in dictB) {
+        delete diff[k];
+    }
+    return diff;
+}

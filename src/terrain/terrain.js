@@ -1,17 +1,10 @@
 import * as THREE from 'three/webgpu';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
-import { NoiseGenerator } from './noise';
 import * as TSL from 'three/tsl';
-import * as CONFIG from './config';
-
-const SKYBOXSCALE = 10000;
-const SUNLIGHTCOLOR = '#FFFFFF'
-const HEMISPHERE_LIGHT_SKY_COLOR = '#bbf7ff';
-const HEMISPHERE_LIGHT_GROUND_COLOR = '#33335f';
-const SUNLIGHT_INTENSITY = 2.0;
-const HEMISPHERE_LIGHT_INTENSITY = 0.6;
-const SUNLIGHT_DISTANCE = 256;
+import { NoiseGenerator } from '../noise';
+import { TerrainAtmosphere } from './terrain-atmosphere';
+import { OrbitController, FPSController } from '../controller';
+import * as UTIL from '../util';
+import { QuadTree } from '../quadtree';
 
 class HeightMap {
     _heightmapNode      = null;
@@ -132,13 +125,13 @@ class TerrainChunk {
         
         // --- TSL Terrain Material Setup ---
         this._material = new THREE.MeshLambertNodeMaterial({
-            color: 0x444444,
+            color: '#444444',
             wireframe: false,
             flatShading: false,
-            side: THREE.DoubleSide
+            side: THREE.FrontSide
         });
         this._materialNodes["diffuseColor"] = TSL.color( this._material.color); // Store original color
-
+        
         this._heightMap = new HeightMap({
             chunkSize: params.chunkSize,
             chunkSegments: params.chunkSegments,
@@ -150,6 +143,10 @@ class TerrainChunk {
         // Debug Visualization
         // Create a node to visualize the normal as a color (0..1 range)
         this._materialNodes["normalColor"] = this._material.normalNode.mul(0.5).add(0.5);
+
+        // set wireframe and normal state
+        this._material.wireframe = params.isWireFrameEnabled;
+        this.displayNormals(params.isNormalsEnabled);
 
         // Create Mesh and set transform
         this._mesh = new THREE.Mesh(geometry, this._material);
@@ -195,6 +192,20 @@ class TerrainChunk {
         }
     }
 
+    displayNormals(isNormalsDisplayed) {
+        // Check if we are currently showing normals
+        if (!isNormalsDisplayed) {
+            // show diffuse
+            this._material.colorNode   = this._materialNodes["diffuseColor"];
+            this._material.lights      = true;
+        } else {
+            // Show normals
+            this._material.colorNode   = this._materialNodes["normalColor"];
+            this._material.lights      = false;
+        }
+        this._material.needsUpdate = true;
+    }
+
     dispose() {
         if (this._mesh?.parent) {
             this._mesh.parent.remove(this._mesh);
@@ -223,19 +234,21 @@ class TerrainChunk {
 class TerrainChunkManager {
     _group      = null;
     _chunks     = {};
-    _chunkSize  = 128;
-    _chunkSegments = 256;
+    _chunkSize  = 64;
+    _chunkSegments = 128;
     _noiseGenerator = null;
     _terrainParams = {};
     _noiseParams = {};
+    _FPSPosition = null
 
     constructor(params) {
+        this._FPSPosition = params.terrainHost.getFPSControllerPosition;
         this._initializeNoise(params);
         this._initializeTerrain(params);
     }
 
     _initializeNoise(params) {
-
+        // setup noise GUI fields
         params.guiParams.noise = {
             noiseType: 'simplex',
             scale: 64.0,
@@ -243,7 +256,7 @@ class TerrainChunkManager {
             persistence: 0.5,
             lacunarity: 2.0,
             exponentiation: 3.9,
-            height: 32.0,
+            height: 16.0,
             seed: 1
         }
         this._noiseParams = params.guiParams.noise;
@@ -261,14 +274,14 @@ class TerrainChunkManager {
             () => { this.onNoiseChange(); });
         noiseRollup.add(params.guiParams.noise, "exponentiation", 0.1, 10.0).onFinishChange(
             () => { this.onNoiseChange(); });
-        noiseRollup.add(params.guiParams.noise, "height", 0, 128).onFinishChange(
+        noiseRollup.add(params.guiParams.noise, "height", 0, 64).onFinishChange(
             () => { this.onNoiseChange(); });
 
         this._noiseGenerator = new NoiseGenerator(this._noiseParams);
     }
 
     _initializeTerrain (params) {
-        // Initialize GUI parameters
+        // Setup terrrain GUI parameters
         params.guiParams.terrain = {
             wireframe : false,
             normals : false,
@@ -288,28 +301,21 @@ class TerrainChunkManager {
         this._group = new THREE.Group();
         this._group.rotation.x = -Math.PI / 2;
         params.scene.add(this._group);
-
-        // create chunks
-        for (let x = -1; x <= 1; x++) {
-            for (let y = -1; y <= 1; y++) {
-                this._addChunk(x, y);
-            }
-        }
     }
 
-    _generateHeightMapTexture(x,y) {
+    _generateHeightMapTexture(centerX, centerY, chunkSize = this._chunkSize) {
         // PlaneGeometry with N segments has (N+1) vertices per axis.
-        // Add a 1-texel border on each side so edge normals can sample central differences across chunk seams.
+        // Add a 1-texel border on each side so edge normals can sample across chunk seams.
         const resolution = this._chunkSegments + 3;
-        const sampleStep = this._chunkSize / this._chunkSegments;
+        const sampleStep = chunkSize / this._chunkSegments;
         const data = new Float32Array(resolution * resolution);
         
         // DataTexture data is row-major: data[row * width + col] = data[y * width + x]
         for (let row = 0; row < resolution; row++) {
             // Row 0 starts one sample outside the chunk, then covers all vertex samples, then one sample outside.
-            const worldY = (y * this._chunkSize) - (this._chunkSize / 2) - sampleStep + (row * sampleStep);
+            const worldY = centerY - (chunkSize / 2) - sampleStep + (row * sampleStep);
             for (let col = 0; col < resolution; col++) {
-                const worldX = (x * this._chunkSize) - (this._chunkSize / 2) - sampleStep + (col * sampleStep);
+                const worldX = centerX - (chunkSize / 2) - sampleStep + (col * sampleStep);
                 data[(row * resolution) + col] = this._noiseGenerator.get2D(worldX, worldY);
             }
         }
@@ -326,82 +332,172 @@ class TerrainChunkManager {
         return texture;
     }
 
-    _key (x, y) {
-        return x + "." + y;
-    }
-
-    _keyCoord(keyStr) {
-        const parts = keyStr.split(".");
-        return {
-            x: parseInt(parts[0], 10),
-            y: parseInt(parts[1], 10)
-        };
-    }
-
-    _addChunk(x, y) {
-        const texture = this._generateHeightMapTexture(x,y);
+    _createChunk(offset, size) {
+        const centerX = offset.x;
+        const centerY = offset.y;
+        const texture = this._generateHeightMapTexture(offset.x, offset.y, size);
 
         // create chunk
-        const terrainChunk = new TerrainChunk({
-            position: new THREE.Vector2(x * this._chunkSize, y * this._chunkSize),
+        return new TerrainChunk({
+            position: new THREE.Vector2(centerX, centerY),
             group: this._group,
-            scale: 1,
-            chunkSize: this._chunkSize,
+            chunkSize: size,
             chunkSegments: this._chunkSegments,
             heightMapTexture: texture,
+            isWireFrameEnabled: this._terrainParams.wireframe,
+            isNormalsEnabled: this._terrainParams.normals,
         });
-
-        this._chunks[this._key(x,y)] = terrainChunk;
     }
 
-    // Event handlers
-    onWireframe() {
-        console.log("Toggle wireframe");
-        for (const k in this._chunks) {
-            const chunk = this._chunks[k];
-            chunk._material.wireframe = this._terrainParams.wireframe;
+    _cellIndex(px, py) {
+        if (!Number.isFinite(px) || !Number.isFinite(py)) {
+            throw new Error('TerrainChunkManager._cellIndex: invalid position parameter');
         }
-    }
 
-    onNormals() {
-        console.log("Toggle Normals");
-        
-        for (const k in this._chunks) {
-            const chunk = this._chunks[k];
-            
-            // Check if we are currently showing normals
-            if (!this._terrainParams.normals) {
-                // show diffuse
-                chunk._material.colorNode   = chunk._materialNodes["diffuseColor"];
-                chunk._material.lights      = true;
-            } else {
-                // Show normals
-                chunk._material.colorNode   = chunk._materialNodes["normalColor"];
-                chunk._material.lights      = false;
-            }
-            chunk._material.needsUpdate = true;
-        }
-    }
-
-    onNoiseChange() {
-        console.log("TerrainChunkManager.onNoiseChange")
-        this._noiseGenerator.setParams(this._noiseParams);
-        for (const k in this._chunks) {
-            const coords = this._keyCoord(k);
-            const texture = this._generateHeightMapTexture(coords.x, coords.y);
-            const chunk = this._chunks[k];
-            chunk.setTexture(texture);
-        }
+        const xp = px + this._chunkSize * 0.5;
+        const yp = py + this._chunkSize * 0.5;
+        const x = Math.floor(xp / this._chunkSize);
+        const y = -Math.floor(yp / this._chunkSize);
+        return[x,y];
     }
 
     update(_deltaTime) {
-        // No per-frame updates yet; keep for interface parity with other entities.
-        return;
+        const updateQuadTree = () => {
+            const QUADTREE_SIZE = 2048;
+            const keyFn = (centerX, centerY, size) => {
+                // Round to integer grid to normalize key precision and prevent floating-point drift
+                const x = Math.round(centerX);
+                const y = Math.round(centerY);
+                return x + "." + y + "[" + size + "]";
+            }
+
+            
+            const quadTree = new QuadTree({
+                min: new THREE.Vector2(-QUADTREE_SIZE, -QUADTREE_SIZE),
+                max: new THREE.Vector2(QUADTREE_SIZE, QUADTREE_SIZE),
+                nodeSize: this._chunkSize,
+            });
+            quadTree.insert(this._FPSPosition());
+            const children = quadTree.getChildren();
+
+            const quadTreeChunks = {};
+            const center = new THREE.Vector2();
+            const dimensions = new THREE.Vector2();
+            for (const c of children) {
+                c.bounds.getCenter(center);
+                c.bounds.getSize(dimensions);
+                const key = keyFn(center.x, center.y, dimensions.x);
+                quadTreeChunks[key] = {
+                    center: [center.x, -center.y],
+                    bounds: c.bounds,
+                    size: dimensions.x,
+                };
+            }
+
+            const newChunks = UTIL.dictDifference(quadTreeChunks, this._chunks);
+            if (Object.keys(newChunks).length === 0) { return; }
+            for (const key in newChunks) {
+                const [xp, zp] = newChunks[key].center;
+                const size = newChunks[key].size;
+                const offset = new THREE.Vector2(xp, zp);
+                this._chunks[key] = {
+                    cellIndex: [xp, zp],
+                    offset: offset,
+                    size: size,
+                    chunk: this._createChunk(offset, size),
+                };
+            }
+
+            const recycleChunks = UTIL.dictDifference(this._chunks, quadTreeChunks);
+            for (const k in recycleChunks) {
+                recycleChunks[k].chunk.dispose();
+                delete this._chunks[k];
+            }
+
+            console.log("Chunks updated: ", Object.keys(newChunks).length, "Chunks removed: ", Object.keys(recycleChunks).length)
+        };
+
+        const updateFixedGrid = () => {
+            const GRID_SIZE = 2;
+            const keyFn = (x, y) => {
+                return x + "." + y;
+            };
+            
+            const pos = this._FPSPosition();
+            const [xc, zc] = this._cellIndex(pos.x, pos.z);
+            
+            // create an object which contains all the cell indexes of chunks
+            // which surrond the player position in a fixed grid of size GRID_SIZE
+            const gridCellIndexes = {};
+            for (let x = -GRID_SIZE; x <= GRID_SIZE; x++) {
+                for (let z= -GRID_SIZE; z <= GRID_SIZE; z++) {
+                    const newChunkKey = keyFn(x + xc, z + zc);
+                    gridCellIndexes[newChunkKey] = { 
+                        cellIndex : [x + xc, z + zc]
+                    };
+                }
+            }
+
+            // Create an object which contains the cell indexes of chunks
+            // which do not exist new updated fixed grid, but do currently exist.
+            const recycleChunks = UTIL.dictDifference(this._chunks, gridCellIndexes);
+            for (const k in recycleChunks) {
+                // Dispose of these chunks.
+                recycleChunks[k].chunk.dispose();
+                delete this._chunks[k];
+            }
+
+            // Create an object which contains the cell indexes of chunks 
+            // that do not already exist and need to be created
+            const newChunkCells = UTIL.dictDifference(gridCellIndexes, this._chunks);
+            for (const k in newChunkCells) {
+                
+                // Guard Check - skip chunks cells that already exist
+                if (k in this._chunks) {
+                    continue;
+                }
+
+                // Create new chunk
+                const size = this._chunkSize;
+                const [xi, zi] = newChunkCells[k].cellIndex;
+                const offset = new THREE.Vector2(xi * this._chunkSize, zi * this._chunkSize);
+                this._chunks[keyFn(xi,zi)] = {
+                    cellIndex: [xi, zi],
+                    offset: offset,
+                    size: size,
+                    chunk: this._createChunk(offset, this._chunkSize),
+                };
+                console.log("Update Fixed Grid: (" + xc + "," + zc + ")");
+            }
+        };
+
+        const updateSingle = () => {
+            const keyFn = (x, y) => { return x + "." + y; };
+            
+            const pos = this._FPSPosition();
+            const [xc, zc] = this._cellIndex(pos.x, pos.z);
+            const newChunkKey = keyFn(xc, zc);
+
+            // Skip, still in bounds of previous chunk of terrain
+            if (newChunkKey in this._chunks) { return; }
+
+            const size = this._chunkSize;
+            const offset = new THREE.Vector2(xc * size, zc * size);
+            this._chunks[newChunkKey] = {
+                cellIndex: [xc, zc],
+                offset: offset,
+                size: size,
+                chunk: this._createChunk(offset, size),
+            };
+            console.log("Update Single Chunk: (" + xc + "," + zc + ")");
+        };
+
+        updateQuadTree();
     }
 
     dispose() {
         for (const k in this._chunks) {
-            const chunk = this._chunks[k];
+            const chunk = this._chunks[k].chunk;
             chunk.dispose();
         }
 
@@ -414,282 +510,54 @@ class TerrainChunkManager {
         this._group = null;
         this._noiseGenerator = null;
     }
-}
 
-class TerrainAtmosphere {
-    _sky = null;
-    _fog = null;
-    _atmosphereHost = null;
-    _atmosphereRollup = null;
-    _lightGroup = null;
-    _skyParams  = {};
-    _sunParams  = {};
-    _fogParams  = {};
-    _sunLight   = null;
-    _fillLight  = null;
-    _hemiLight  = null;
-    _sunTarget  = null;
-    _sunLightHelper = null;
-    _fillLightHelper = null;
-    _hemiLightHelper = null;
-
-    constructor(params) {
-        // guard check params are valid
-        if (typeof params.atmosphereHost?.setFog !== 'function') {
-            throw new Error('TerrainAtmosphere: params.atmosphereHost.setFog must be a function.');
-        }
-
-        // Setup GUI controls for sun and sky
-        params.guiParams.sky = { 
-            turbidity: 0.2,
-            rayleigh: 0.3,
-            mieCoefficient: 0.005,
-            mieDirectionalG: 0.6,
-        };
-
-        params.guiParams.sun = { 
-            intensity: 7.0,
-            inclination: 35.0,
-            azimuth: 242.0,
-        };
-
-        params.guiParams.fog = {
-            enable: true,
-            color: '#96afca',
-            near: 64,
-            far: 1024,
-        };
-
-        this._skyParams = params.guiParams.sky;
-        this._sunParams = params.guiParams.sun;
-        this._fogParams = params.guiParams.fog;
-
-        this._atmosphereRollup = params.gui.addFolder("Atmosphere");
-        const skyRollup = this._atmosphereRollup.addFolder("Sky");
-        const sunRollup = this._atmosphereRollup.addFolder("Sun");
-        const fogRollup = this._atmosphereRollup.addFolder("Fog");
-
-        // sky
-        skyRollup.add(params.guiParams.sky, "turbidity", 0.01, 1.0)
-            .onChange(() => { this.onSunSkyChange(); });
-        skyRollup.add(params.guiParams.sky, "rayleigh", 0.01, 1.0)
-            .onChange(() => { this.onSunSkyChange(); });
-        skyRollup.add(params.guiParams.sky, "mieCoefficient", 0.0001, 0.1)
-            .onChange(() => { this.onSunSkyChange(); });
-        skyRollup.add(params.guiParams.sky, "mieDirectionalG", 0.0, 1.0)
-            .onChange(() => { this.onSunSkyChange(); });
-
-        // sun
-        sunRollup.add(params.guiParams.sun, "intensity", 1.0, 10.0)
-            .onChange(() => { this.onSunSkyChange(); })
-            .name("intensity");
-        sunRollup.add(params.guiParams.sun, "inclination", 0.0, 180.0)
-            .onChange(() => { this.onSunSkyChange(); })
-            .name("inclination (degrees)");
-        sunRollup.add(params.guiParams.sun, "azimuth", 0.0, 360.0)
-            .onChange(() => { this.onSunSkyChange(); })
-            .name("azimuth (degrees)");
-
-        // fog
-        fogRollup.add(params.guiParams.fog, "enable", true)
-            .onChange(() => { this._atmosphereHost.setFog(this._fogParams.enable ? this._fog : null); })
-            .name("enabled");
-        fogRollup.addColor(params.guiParams.fog, "color")
-            .onChange(() => { this.onFogChange(); })
-            .name("color");
-        fogRollup.add(params.guiParams.fog, "near", 1.0, 128.0)
-            .onChange(() => { this.onFogChange(); })
-            .name("near clip");
-        fogRollup.add(params.guiParams.fog, "far", 128.0, SKYBOXSCALE)
-            .onChange(() => { this.onFogChange(); })
-            .name("far clip");
-
-        // Setup Sky
-        this._sky = new SkyMesh();
-        this._sky.scale.setScalar(SKYBOXSCALE);
-        params.scene.add(this._sky);
-
-        // Setup atmospheric fog
-        this._fog = new THREE.Fog(this._fogParams.color, this._fogParams.near, this._fogParams.far);
-        this._atmosphereHost = params.atmosphereHost;
-
-        // create lights
-        const lightGroup = new THREE.Group();
-        this._lightGroup = lightGroup;
-
-        // Sun light
-        this._sunTarget = new THREE.Object3D();
-        this._sunTarget.position.set(0, 0, 0);
-
-        this._sunLight = new THREE.DirectionalLight(SUNLIGHTCOLOR, SUNLIGHT_INTENSITY);
-        this._sunLight.target = this._sunTarget;
-        this._sunLight.position.set(-1, 2, 4);
-        lightGroup.add(this._sunTarget);
-        lightGroup.add(this._sunLight);
-
-        // hemisphere light
-        const hemiLight = new THREE.HemisphereLight(HEMISPHERE_LIGHT_SKY_COLOR, HEMISPHERE_LIGHT_GROUND_COLOR, HEMISPHERE_LIGHT_INTENSITY);
-        this._hemiLight = hemiLight;
-        lightGroup.add(hemiLight);
-
-        // Add light helpers for visualization
-        const sunLightHelper = new THREE.DirectionalLightHelper(this._sunLight, 20);
-        this._sunLightHelper = sunLightHelper;
-        lightGroup.add(sunLightHelper);
-        
-        const hemiLightHelper = new THREE.HemisphereLightHelper(hemiLight, 256);
-        this._hemiLightHelper = hemiLightHelper;
-        lightGroup.add(hemiLightHelper);
-
-        params.scene.add(lightGroup);
-
-        // Initialize atmosphere 
-        this.onSunSkyChange();
-        this.onFogChange();
-        this._atmosphereHost.setFog(this._fogParams.enable ? this._fog : null);
-    }
-
-    update(_deltaTime) {
-        // TODO: Implement update function 
-        return;
-    }
-
-    // event handlers
-    onSunSkyChange() {
-        
-        // Inclination is the vertical angle (0 = bottom, PI/2 = horizon, PI = top)
-        // Azimuth is the horizontal rotation (0 to 2*PI)
-        const theta = Math.PI / 2 - THREE.MathUtils.degToRad(this._sunParams.inclination);
-        const phi = THREE.MathUtils.degToRad(this._sunParams.azimuth);
-        
-        const sunPosition = new THREE.Vector3(
-            Math.sin(theta) * Math.cos(phi),
-            Math.cos(theta),
-            Math.sin(theta) * Math.sin(phi)
-        ).normalize();
-        
-        // Update SkyMesh parameters via its uniform nodes
-        if (this._sky) {
-            if (this._sky.sunPosition?.value) {
-                this._sky.sunPosition.value.copy(sunPosition);
-            }
-            if (this._sky.turbidity?.value !== undefined) {
-                this._sky.turbidity.value = this._skyParams.turbidity;
-            }
-            if (this._sky.rayleigh?.value !== undefined) {
-                this._sky.rayleigh.value = this._skyParams.rayleigh;
-            }
-            if (this._sky.mieCoefficient?.value !== undefined) {
-                this._sky.mieCoefficient.value = this._skyParams.mieCoefficient;
-            }
-            if (this._sky.mieDirectionalG?.value !== undefined) {
-                this._sky.mieDirectionalG.value = this._skyParams.mieDirectionalG;
-            }
-        }
-
-        // update sun position
-        ((position) => {
-            if (!this._sunLight || !this._sunTarget || !position) {
-                console.error("Missing required sunLight");
-                return;
-            }
-
-            // Position sun light
-            this._sunLight.position.copy(
-                position.clone().multiplyScalar(SUNLIGHT_DISTANCE)
-            );
-
-
-            this._sunTarget.position.set(0, 0, 0);
-            this._sunTarget.updateMatrixWorld();
-        })(sunPosition);
-
-        if (this._sunLight) {
-            this._sunLight.intensity = this._sunParams.intensity;
+    // Event handlers
+    onWireframe() {
+        for (const k in this._chunks) {
+            const chunk = this._chunks[k].chunk;
+            chunk._material.wireframe = this._terrainParams.wireframe;
         }
     }
 
-    onFogChange() {
-        if (!this._fog) {
-            return;
+    onNormals() {
+        for (const k in this._chunks) {
+            const chunk = this._chunks[k].chunk;
+            chunk.displayNormals(this._terrainParams.normals);
         }
-
-        // Ensure color assignment works with number or Color input
-        this._fog.color.set(this._fogParams.color);
-        this._fog.near = this._fogParams.near;
-        this._fog.far = this._fogParams.far;
     }
 
-    dispose() {
-        this._atmosphereHost?.setFog(null);
+    onNoiseChange() {
+        this._noiseGenerator.setParams(this._noiseParams);
+        for (const k in this._chunks) {
+            const {cellIndex, offset, size, chunk} = this._chunks[k];
 
-        if (this._sunLightHelper) {
-            this._sunLightHelper.parent?.remove(this._sunLightHelper);
-            this._sunLightHelper.dispose();
-            this._sunLightHelper = null;
+            const texture = this._generateHeightMapTexture(offset.x, offset.y, size);
+            chunk.setTexture(texture);
         }
-
-        if (this._fillLightHelper) {
-            this._fillLightHelper.parent?.remove(this._fillLightHelper);
-            this._fillLightHelper.dispose();
-            this._fillLightHelper = null;
-        }
-
-        if (this._hemiLightHelper) {
-            this._hemiLightHelper.parent?.remove(this._hemiLightHelper);
-            this._hemiLightHelper.dispose();
-            this._hemiLightHelper = null;
-        }
-
-        if (this._sky) {
-            this._sky.parent?.remove(this._sky);
-            this._sky.geometry?.dispose?.();
-            this._sky.material?.dispose?.();
-            this._sky = null;
-        }
-
-        this._sunTarget?.parent?.remove(this._sunTarget);
-        this._sunLight?.parent?.remove(this._sunLight);
-        this._fillLight?.parent?.remove(this._fillLight);
-        this._hemiLight?.parent?.remove(this._hemiLight);
-        this._lightGroup?.parent?.remove(this._lightGroup);
-
-        if (this._atmosphereRollup) {
-            this._atmosphereRollup.destroy();
-            this._atmosphereRollup = null;
-        }
-
-        this._fog = null;
-        this._sunTarget = null;
-        this._sunLight = null;
-        this._fillLight = null;
-        this._hemiLight = null;
-        this._lightGroup = null;
-        this._atmosphereHost = null;
     }
 }
 
 export class TerrainScene {
-    _entities    = {};
-    _scene      = null;
-    _camera     = null;
-    _controls   = null;
+    _entities = {};
+    _scene = null;
+    _activeController = null;
+    _sceneParams = null;
 
     constructor(params) {
-    // set up scene and camera
         this._scene     = new THREE.Scene();
-        this._camera    = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
 
-        // set up orbit controls
-        this._controls = new OrbitControls(this._camera, CONFIG.CANVAS_TARGET);
-        this._controls.enableDamping = true;
-        this._controls.dampingFactor = 0.05;
+        // Set up scene GUI
+        params.guiParams.scene = {
+            activeController : "FPS",
+        }
+        this._sceneParams = params.guiParams.scene;
 
-        // Position camera
-        this._camera.position.z = 10;
-        this._camera.position.y = 30;
-
-        // Create sun and sky
+        const sceneRollup = params.gui.addFolder('Scene');
+        sceneRollup.add(this._sceneParams, "activeController", ["Orbit", "FPS"])
+            .onChange(() => { this.onActiveControllerChange(); })
+            .name("active controller");
+    
+        // Create Scene entities
         this._entities['atmosphere'] = new TerrainAtmosphere({
             scene : this._scene,
             gui : params.gui,
@@ -701,19 +569,31 @@ export class TerrainScene {
             }
         });
 
-        // Create terrain
         this._entities['terrain'] = new TerrainChunkManager({
             scene : this._scene,
             gui : params.gui,
-            guiParams : params.guiParams
+            guiParams : params.guiParams,
+            terrainHost : {
+                getFPSControllerPosition: () => {
+                    return this._entities['fps-controller'].getPosition();
+                }
+            }
         });
 
+        this._entities['orbit-controller'] = new OrbitController({
+            scene : this._scene,
+            gui : params.gui,
+        });
+
+        this._entities['fps-controller'] = new FPSController({
+            scene : this._scene,
+            gui : params.gui
+        });
+
+        this.onActiveControllerChange();
     }
 
     update(deltaTime) {
-        // update camera controls
-        this._controls.update();
-
         // update entities
         for (const k in this._entities) {
             const entity = this._entities[k];
@@ -723,7 +603,7 @@ export class TerrainScene {
 
     render(renderer) {
         // render frame
-        renderer.render(this._scene, this._camera);
+        renderer.render(this._scene, this._activeController.getCamera());
     }
 
     dispose() {
@@ -745,9 +625,27 @@ export class TerrainScene {
     }
 
     // Event call back functions
+    onActiveControllerChange() {
+        if (this._activeController !== null) {
+            this._activeController.setActive(false);
+        }
+        switch(this._sceneParams.activeController) {
+            case "Orbit":
+                this._activeController = this._entities['orbit-controller'];
+                break;
+            case "FPS":
+                this._activeController = this._entities['fps-controller'];
+                break;
+            default:
+                this._activeController = this._entities['orbit-controller'];
+                break;
+        }
+        this._activeController.setActive(true);
+    }
+
     onWindowResize() {
         // Update camera
-        this._camera.aspect = window.innerWidth / window.innerHeight;
-        this._camera.updateProjectionMatrix();
+        this._entities['orbit-controller'].onWindowResize();
+        this._entities['fps-controller'].onWindowResize();
     }
 }
